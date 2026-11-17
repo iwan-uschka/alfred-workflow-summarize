@@ -1,0 +1,317 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>bundleid</key>
+	<string>com.creativytool.alfred.summarize</string>
+	<key>category</key>
+	<string>Productivity</string>
+	<key>connections</key>
+	<dict>
+		<key>A1D6C3E2-5B7F-4C1A-9E2D-3F4B5A6C7D81</key>
+		<array>
+			<dict>
+				<key>destinationuid</key>
+				<string>B2E7D4F3-6C8A-4D2B-8F3E-4A5B6C7D8E92</string>
+				<key>modifiers</key>
+				<integer>0</integer>
+				<key>modifiersubtext</key>
+				<string></string>
+				<key>vitoclose</key>
+				<false/>
+			</dict>
+		</array>
+	</dict>
+	<key>createdby</key>
+	<string></string>
+	<key>description</key>
+	<string>Summarize the active window or the clipboard into a TL;DR and bullets.</string>
+	<key>disabled</key>
+	<false/>
+	<key>name</key>
+	<string>Summarize</string>
+	<key>objects</key>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>alfredfiltersresults</key>
+				<false/>
+				<key>alfredfiltersresultsmatchmode</key>
+				<integer>0</integer>
+				<key>argumenttreatemptyqueryasnil</key>
+				<true/>
+				<key>argumenttrimmode</key>
+				<integer>0</integer>
+				<key>argumenttype</key>
+				<integer>1</integer>
+				<key>escaping</key>
+				<integer>0</integer>
+				<key>keyword</key>
+				<string>{var:SUM_KEYWORD}</string>
+				<key>queuedelaycustom</key>
+				<integer>3</integer>
+				<key>queuedelayimmediatelyinitially</key>
+				<true/>
+				<key>queuedelaymode</key>
+				<integer>0</integer>
+				<key>queuemode</key>
+				<integer>1</integer>
+				<key>runningsubtext</key>
+				<string></string>
+				<key>script</key>
+				<string>/bin/bash ./scripts/rows.sh "$1"</string>
+				<key>scriptargtype</key>
+				<integer>1</integer>
+				<key>scriptfile</key>
+				<string></string>
+				<key>skipuniversalaction</key>
+				<true/>
+				<key>subtext</key>
+				<string>Active window or clipboard</string>
+				<key>title</key>
+				<string>Summarize</string>
+				<key>type</key>
+				<integer>0</integer>
+				<key>withspace</key>
+				<true/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.input.scriptfilter</string>
+			<key>uid</key>
+			<string>A1D6C3E2-5B7F-4C1A-9E2D-3F4B5A6C7D81</string>
+			<key>version</key>
+			<integer>3</integer>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>behaviour</key>
+				<integer>2</integer>
+				<key>fontmode</key>
+				<integer>0</integer>
+				<key>fontsizing</key>
+				<integer>0</integer>
+				<key>footertext</key>
+				<string>⌘C Copy</string>
+				<key>inputfile</key>
+				<string>scripts/summarize.sh</string>
+				<key>inputtype</key>
+				<integer>1</integer>
+				<key>loadingtext</key>
+				<string>Summarizing…</string>
+				<key>outputmode</key>
+				<integer>1</integer>
+				<key>scriptinput</key>
+				<integer>2</integer>
+				<key>spellchecking</key>
+				<integer>0</integer>
+				<key>stackview</key>
+				<false/>
+			</dict>
+			<key>type</key>
+			<string>alfred.workflow.userinterface.text</string>
+			<key>uid</key>
+			<string>B2E7D4F3-6C8A-4D2B-8F3E-4A5B6C7D8E92</string>
+			<key>version</key>
+			<integer>1</integer>
+		</dict>
+	</array>
+	<key>readme</key>
+	<string>Summarize the active window or the clipboard with Claude, or any other command that reads text on stdin and writes a summary to stdout.
+
+Type the keyword (default: sum) and pick a row:
+  Active window   the selection or page text in Safari, Chrome or Brave, or the selected message in Mail
+  Clipboard       the clipboard text, or the web page when the clipboard holds one URL
+
+The summary streams into a Text View. Press ⌘C to copy it.
+
+Page text and mail bodies go to whatever the configured command talks to. With the default command, that is Anthropic's API through Claude Code.
+
+Requires Alfred 5.5 or later and a logged-in claude command (run claude once in a terminal).</string>
+	<key>uidata</key>
+	<dict>
+		<key>A1D6C3E2-5B7F-4C1A-9E2D-3F4B5A6C7D81</key>
+		<dict>
+			<key>xpos</key>
+			<real>110</real>
+			<key>ypos</key>
+			<real>110</real>
+		</dict>
+		<key>B2E7D4F3-6C8A-4D2B-8F3E-4A5B6C7D8E92</key>
+		<dict>
+			<key>xpos</key>
+			<real>360</real>
+			<key>ypos</key>
+			<real>110</real>
+		</dict>
+	</dict>
+	<key>userconfigurationconfig</key>
+	<array>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>sum</string>
+				<key>placeholder</key>
+				<string></string>
+				<key>required</key>
+				<true/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>The Alfred keyword that shows the two rows.</string>
+			<key>label</key>
+			<string>Keyword</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>SUM_KEYWORD</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>claude -p --model "$SUM_MODEL" --tools "" --no-session-persistence --system-prompt "$SUM_PROMPT"</string>
+				<key>placeholder</key>
+				<string></string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Run by /bin/zsh -c in an empty temporary directory. Reads the text on stdin and writes the summary to stdout. $SUM_MODEL and $SUM_PROMPT hold the two settings below.</string>
+			<key>label</key>
+			<string>Command</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>SUM_COMMAND</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>sonnet</string>
+				<key>placeholder</key>
+				<string></string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Passed to the command as $SUM_MODEL.</string>
+			<key>label</key>
+			<string>Model</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>SUM_MODEL</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string></string>
+				<key>placeholder</key>
+				<string>same as the input</string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Language of the summary. Empty means the language of the input.</string>
+			<key>label</key>
+			<string>Language</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>SUM_LANGUAGE</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>3</string>
+				<key>placeholder</key>
+				<string></string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Fewest bullet points under the TL;DR.</string>
+			<key>label</key>
+			<string>Fewest bullets</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>SUM_MIN_BULLETS</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string>10</string>
+				<key>placeholder</key>
+				<string></string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+			</dict>
+			<key>description</key>
+			<string>Most bullet points under the TL;DR.</string>
+			<key>label</key>
+			<string>Most bullets</string>
+			<key>type</key>
+			<string>textfield</string>
+			<key>variable</key>
+			<string>SUM_MAX_BULLETS</string>
+		</dict>
+		<dict>
+			<key>config</key>
+			<dict>
+				<key>default</key>
+				<string></string>
+				<key>required</key>
+				<false/>
+				<key>trim</key>
+				<true/>
+				<key>verticalsize</key>
+				<integer>6</integer>
+			</dict>
+			<key>description</key>
+			<string>Replaces the bundled prompt.md when not empty. {min_bullets}, {max_bullets} and {language} are filled in here too.</string>
+			<key>label</key>
+			<string>Prompt override</string>
+			<key>type</key>
+			<string>textarea</string>
+			<key>variable</key>
+			<string>SUM_PROMPT_OVERRIDE</string>
+		</dict>
+	</array>
+	<key>variables</key>
+	<dict>
+		<key>SUM_APP_TIMEOUT</key>
+		<string>60</string>
+		<key>SUM_FETCH_TIMEOUT</key>
+		<string>15</string>
+		<key>SUM_MAX_CHARS</key>
+		<string>200000</string>
+		<key>SUM_TIMEOUT</key>
+		<string>120</string>
+	</dict>
+	<key>variablesdontexport</key>
+	<array/>
+	<key>version</key>
+	<string>0.1.0</string>
+	<key>webaddress</key>
+	<string></string>
+</dict>
+</plist>
