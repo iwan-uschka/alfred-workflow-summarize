@@ -9,6 +9,12 @@ OUT="dist/Summarize.alfredworkflow"
 command -v zip >/dev/null 2>&1 || { echo "ERROR: zip not found on PATH" >&2; exit 1; }
 command -v unzip >/dev/null 2>&1 || { echo "ERROR: unzip not found on PATH" >&2; exit 1; }
 
+# zip only warns about a missing file and still exits 0, which would build a
+# workflow that Alfred rejects at import time.
+for f in info.plist prompt.md; do
+  [[ -f "$f" ]] || { echo "ERROR: $f not found" >&2; exit 1; }
+done
+
 # Alfred runs the Text View's script file directly, so it needs its execute
 # bit inside the archive. nullglob so an empty match doesn't hand chmod the
 # literal pattern and abort the build under `set -e`.

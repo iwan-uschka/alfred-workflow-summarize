@@ -11,9 +11,11 @@ STUBS=$(mktemp -d)
 trap 'rm -rf "$STUBS"' EXIT
 export STUB_LOG="$STUBS/calls.log"
 
-# pbpaste: prints $STUB_CLIP_FILE. STUB_PBPASTE_FAIL=1 fails instead.
+# pbpaste: prints $STUB_CLIP_FILE. STUB_PBPASTE_FAIL=1 fails instead;
+# STUB_PBPASTE_HANG=1 sleeps.
 cat >"$STUBS/pbpaste" <<'STUB'
 echo "pbpaste" >>"$STUB_LOG"
+[ "${STUB_PBPASTE_HANG:-0}" = 1 ] && sleep 30
 if [ "${STUB_PBPASTE_FAIL:-0}" = 1 ]; then
   echo "pbpaste: no pasteboard" >&2
   exit 1
@@ -120,7 +122,7 @@ front() {
 reset_stubs() {
   : >"$STUB_LOG"
   rm -f "$STUBS"/cmd.* "$STUBS/last.applescript"
-  unset STUB_PBPASTE_FAIL STUB_LSAPPINFO_FAIL STUB_OSA_ERR STUB_OSA_RC STUB_OSA_HANG \
+  unset STUB_PBPASTE_FAIL STUB_PBPASTE_HANG STUB_LSAPPINFO_FAIL STUB_OSA_ERR STUB_OSA_RC STUB_OSA_HANG \
     STUB_CURL_RC STUB_CURL_ERR STUB_CURL_HANG STUB_HTTP_CODE STUB_CTYPE STUB_CMD_MODE
   clip ""
   front ""

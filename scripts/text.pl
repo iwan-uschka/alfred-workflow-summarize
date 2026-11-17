@@ -62,9 +62,16 @@ sub read_file {
     return utf8_in(slurp_bytes($fh));
 }
 
+# A bad argument exits 255 on purpose. A bare die takes its exit code from
+# errno when that is non-zero, which depends on the Perl build.
+sub usage_error {
+    print STDERR @_;
+    exit 255;
+}
+
 sub positive_int {
     my ($n, $what) = @_;
-    die "text.pl: $what must be a whole number of 1 or more\n"
+    usage_error("text.pl: $what must be a whole number of 1 or more\n")
         unless defined $n && $n =~ /\A[0-9]+\z/ && $n > 0;
     return $n;
 }
@@ -125,13 +132,13 @@ my %commands = (
         $h =~ s/<!--.*?-->//gs;
         # A page with exactly one <main> keeps only that, which drops site
         # navigation that is not marked up as <nav>.
-        my @mains = $h =~ /<main\b/gi;
-        if (@mains == 1 && $h =~ m{(<main\b[^>]*>.*</main\s*>)}si) {
+        my @mains = $h =~ /<main(?![\w-])/gi;
+        if (@mains == 1 && $h =~ m{(<main(?![\w-])[^>]*>.*</main\s*>)}si) {
             $h = "<html><body>$1</body></html>";
         }
         for my $tag (qw(head script style noscript template svg math iframe
                         object canvas nav aside footer form button select)) {
-            $h =~ s{<$tag\b[^>]*>.*?</$tag\s*>}{}gsi;
+            $h =~ s{<$tag(?![\w-])[^>]*>.*?</$tag\s*>}{}gsi;
         }
         # Tags that make textutil load a resource. textutil waits for those
         # and gives up after 60 seconds on a typical news page.
@@ -177,12 +184,13 @@ my %commands = (
 
     'view-running' => sub {
         my ($job) = @_;
+        my $job_chars = utf8_in($job);   # for JSON only; keep $job (bytes) for file paths
         my $body = read_file("$job/out");
         $body = read_file("$job/status") unless length trim($body);
         json_out({
             rerun     => $RERUN,
             response  => join_parts(read_file("$job/notice"), $body),
-            variables => { sum_job => $job },
+            variables => { sum_job => $job_chars },
             behaviour => { response => 'replace', scroll => 'end' },
         });
     },
@@ -207,5 +215,5 @@ my %commands = (
 );
 
 my $cmd = shift @ARGV;
-die "usage: text.pl <command> [args]\n" unless defined $cmd && $commands{$cmd};
+usage_error("usage: text.pl <command> [args]\n") unless defined $cmd && $commands{$cmd};
 $commands{$cmd}->(@ARGV);

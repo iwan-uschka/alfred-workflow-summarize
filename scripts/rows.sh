@@ -34,7 +34,9 @@ clipboard_subtitle() {
   text=$(tool_run SUM_PBPASTE pbpaste 5 2>/dev/null | text_pl trim)
   if [ -z "$text" ]; then
     echo "empty"
-  elif host=$(text_pl url-host "$text"); then
+  # A clipboard over 2048 characters counts as text, not a URL. As an
+  # argument to url-host it could exceed the argv size limit.
+  elif [ "${#text}" -le 2048 ] && host=$(text_pl url-host "$text" 2>/dev/null); then
     echo "$host"
   else
     printf '%s' "$text" | text_pl preview "$PREVIEW_CHARS"

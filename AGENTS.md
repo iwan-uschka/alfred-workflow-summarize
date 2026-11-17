@@ -73,7 +73,8 @@ same script-input Text View. Alfred does not document these numbers.
   `~/.local/bin`, `~/.claude/local`, `~/.npm-global/bin`, `~/.volta/bin` and
   `$NPM_CONFIG_PREFIX/bin` in front, where they exist.
 - Limits: `SUM_TIMEOUT` for the command, `SUM_FETCH_TIMEOUT` for the page
-  download and its conversion, `SUM_APP_TIMEOUT` for each AppleScript call.
+  download and its conversion, `SUM_APP_TIMEOUT` for each AppleScript call
+  and for reading the clipboard.
 
 ## Design decisions
 
@@ -152,14 +153,16 @@ for t in test/*.test.sh; do bash "$t" || exit 1; done
   plist's defaults match the script's.
 - `test/text.test.sh`: `text.pl`, `timeout.pl` and `html_to_text` against
   the fixtures.
+- `test/helpers.test.sh`: the assertion helpers in `test/helpers.sh`, run
+  in a subshell with fresh counters.
 - `test/build.test.sh`, `test/make_release.test.sh`: packaging and release
   guards in temp copies and throwaway git repos. They never write to this
   repo's `dist/` and never reach the network.
 
 Stubs live in `test/stubs.sh`. The variables `SUM_PBPASTE`, `SUM_LSAPPINFO`,
-`SUM_OSASCRIPT`, `SUM_CURL` and `SUM_TEXTUTIL` replace those tools with a
-command line split on spaces, so the stubs run as `/bin/bash <file>` and need
-no execute bit. `SUM_COMMAND` points at a stub backend that logs its stdin,
+`SUM_OSASCRIPT` and `SUM_CURL` replace those tools with a command line split
+on spaces, so the stubs run as `/bin/bash <file>` and need no execute bit.
+`textutil` and `perl` run for real in the flow tests. `SUM_COMMAND` points at a stub backend that logs its stdin,
 working directory, prompt and model. No test can reach the real `claude`:
 the cases that need a command starting with `claude` point `ZDOTDIR` at a
 `.zshenv` defining a `claude` function, which zsh runs before searching PATH.

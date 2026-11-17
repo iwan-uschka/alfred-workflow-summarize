@@ -38,6 +38,10 @@ if [ -n "$remote_tag_check" ]; then
   exit 1
 fi
 
+# Without --target, gh creates a new tag at the remote default branch, which
+# lacks the version bump when this runs on another branch.
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+
 echo "-> Version: ${VERSION} (tag: ${TAG})"
 
 # Bump the root-level version key in info.plist, restoring it if anything
@@ -79,5 +83,6 @@ echo "     git add info.plist && git commit -m 'Release ${VERSION}' && git push"
 echo ""
 echo "  2. Create the GitHub release:"
 echo "     gh release create ${TAG} ${RELEASE} ${RELEASE}.sha256 \\"
+echo "       --target \"${BRANCH}\" \\"
 echo "       --title \"Summarize ${VERSION}\" \\"
 echo "       --generate-notes"

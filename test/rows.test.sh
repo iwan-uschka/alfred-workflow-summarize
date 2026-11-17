@@ -40,6 +40,7 @@ assert_eq "clipboard text preview" "Some clipboard text" "$(subtitle Clipboard)"
 refute_contains "building rows never runs osascript" "$calls" "osascript"
 
 # --- the Active window subtitle per app ---
+# breaks-if: app_kind's default branch stops mapping unknown apps to "not supported"
 for pair in "com.google.Chrome|Google Chrome|Google Chrome: selection or page text" \
     "com.brave.Browser|Brave Browser|Brave Browser: selection or page text" \
     "com.apple.mail|Mail|Mail: selected message" \
@@ -50,6 +51,7 @@ for pair in "com.google.Chrome|Google Chrome|Google Chrome: selection or page te
   rows
   assert_eq "subtitle for $id" "$want" "$(subtitle 'Active window')"
 done
+# breaks-if: window_subtitle's empty APP_ID guard is removed
 front "" ""
 rows
 assert_eq "no front app" "No active window" "$(subtitle 'Active window')"
@@ -62,6 +64,7 @@ assert_eq "URL shows its host" "www.example.com" "$(subtitle Clipboard)"
 clip $'  \n https://example.org/x \n'
 rows
 assert_eq "URL with surrounding whitespace shows its host" "example.org" "$(subtitle Clipboard)"
+# breaks-if: url-host accepts a bare domain, a lone scheme or multi-line text
 clip $'https://example.org/x\nsecond line'
 rows
 assert_eq "multi-line text starting with a URL is text" "https://example.org/x second line" "$(subtitle Clipboard)"
@@ -71,6 +74,15 @@ assert_eq "bare domain is text" "example.com/page" "$(subtitle Clipboard)"
 clip "http://"
 rows
 assert_eq "lone http:// is text" "http://" "$(subtitle Clipboard)"
+pad=$(printf 'a%.0s' $(seq 1 2028))
+clip "https://example.com/$pad"
+rows
+assert_eq "a 2048-character URL shows its host" "example.com" "$(subtitle Clipboard)"
+clip "https://example.com/${pad}a"
+rows
+# breaks-if: the length check before url-host in rows.sh is removed
+assert_contains "a 2049-character clipboard is text, not a URL" "$(subtitle Clipboard)" "https://example.com/aaa"
+# breaks-if: the empty branch stops treating an empty or whitespace-only clipboard as empty
 clip ""
 rows
 assert_eq "empty clipboard" "empty" "$(subtitle Clipboard)"
@@ -147,7 +159,10 @@ assert_eq "Alfred does not filter or reorder" "false" \
 script_line=$(plutil -extract objects.0.config.script raw -o - "$ROOT/info.plist")
 front com.apple.Safari Safari
 clip "hello"
+# breaks-if: the plist script stops passing "$1" to rows.sh, or exits non-zero
 out=$(cd "$ROOT" && bash -c "$script_line" sum "clip" 2>/dev/null)
-assert_eq "plist command line runs the filter" "Clipboard" "$(titles)"
+code=$?
+assert_eq "plist command line exit code" "0" "$code"
+assert_eq "plist command line runs the filter with the query" "Clipboard" "$(titles)"
 
 finish_tests

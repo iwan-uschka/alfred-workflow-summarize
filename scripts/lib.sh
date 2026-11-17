@@ -21,14 +21,17 @@ DEFAULT_COMMAND='claude -p --model "$SUM_MODEL" --tools "" --no-session-persiste
 text_pl() { "$PERL" "$LIB_DIR/text.pl" "$@"; }
 
 # tool_run VAR DEFAULT SECONDS [ARGS...]: runs the external tool DEFAULT, or
-# the command line in the variable named VAR when that is set, killed after
+# the command line in the variable named VAR when that is not blank, killed after
 # SECONDS. The command line is split on spaces. Tests use VAR to swap
 # pbpaste, lsappinfo, osascript, curl and textutil for stubs, for example
 # SUM_CURL="/bin/bash /tmp/stubs/curl".
 tool_run() {
-  local spec="${!1:-$2}" secs="$3" words
+  local spec="${!1:-$2}" tool="$2" secs="$3" words
   shift 3
   read -r -a words <<<"$spec"
+  # A blank VAR splits into no words, which `set -u` can't expand, so it
+  # falls back to DEFAULT like an empty one.
+  [ "${#words[@]}" -gt 0 ] || words=("$tool")
   "$PERL" "$LIB_DIR/timeout.pl" "$secs" "${words[@]}" "$@"
 }
 
@@ -52,11 +55,12 @@ setup_env() {
 # there is none. lsappinfo needs no Automation permission. While Alfred's
 # window is open, it still reports the app the user was working in.
 front_app() {
-  local info
+  local asn info
   APP_ID=""
   APP_NAME=""
-  info=$(tool_run SUM_LSAPPINFO lsappinfo 5 info -only bundleid -only name \
-    "$(tool_run SUM_LSAPPINFO lsappinfo 5 front 2>/dev/null)" 2>/dev/null) || return 0
+  asn=$(tool_run SUM_LSAPPINFO lsappinfo 5 front 2>/dev/null) || return 0
+  [ -n "$asn" ] || return 0
+  info=$(tool_run SUM_LSAPPINFO lsappinfo 5 info -only bundleid -only name "$asn" 2>/dev/null) || return 0
   APP_ID=$(printf '%s\n' "$info" | sed -n 's/.*"CFBundleIdentifier"="\(.*\)".*/\1/p' | head -n 1)
   APP_NAME=$(printf '%s\n' "$info" | sed -n 's/.*"LSDisplayName"="\(.*\)".*/\1/p' | head -n 1)
   [ -n "$APP_NAME" ] || APP_NAME="$APP_ID"

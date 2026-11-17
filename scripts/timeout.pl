@@ -18,8 +18,13 @@ use POSIX ();
 # Seconds between the polite TERM and the KILL for a command that ignores it.
 my $GRACE = 2;
 
+# A larger value would switch the timeout off instead of setting it: alarm
+# wraps anything above 32 bits, and the macOS kernel refuses a timer longer
+# than 100000000 seconds.
+my $MAX_SECS = 100000000;
+
 my $secs = shift @ARGV;
-unless (defined $secs && $secs =~ /\A[0-9]+\z/ && $secs > 0 && @ARGV) {
+unless (defined $secs && $secs =~ /\A[0-9]+\z/ && $secs > 0 && $secs <= $MAX_SECS && @ARGV) {
     print STDERR "usage: timeout.pl SECONDS COMMAND [ARGS...]\n";
     exit 125;
 }
@@ -49,7 +54,9 @@ $SIG{ALRM} = sub {
 };
 $SIG{TERM} = sub {
     $stopping = 1;
+    $timed_out = 1;      # the next ALRM sends KILL
     kill 'TERM', -$pid;
+    alarm $GRACE;
 };
 alarm $secs;
 
@@ -57,6 +64,9 @@ my $done;
 do { $done = waitpid($pid, 0) } while ($done == -1 && $!{EINTR});
 my $status = $?;
 alarm 0;
+# The command may have died on the TERM while something else in its group
+# ignored it. Cancelling the alarm cancelled that one's KILL, so send it now.
+kill 'KILL', -$pid if $timed_out;
 
 exit 143 if $stopping;
 exit 124 if $timed_out;

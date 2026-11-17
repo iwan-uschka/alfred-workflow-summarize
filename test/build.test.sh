@@ -23,11 +23,14 @@ stage() {
   mkdir -p "$dir"
   cp "$ROOT/build.sh" "$ROOT/info.plist" "$ROOT/prompt.md" "$dir/"
   cp -R "$ROOT/scripts" "$dir/scripts"
+  # start without execute bits so the test proves build.sh sets them
+  chmod -x "$dir"/scripts/*.sh "$dir"/scripts/*.pl
   printf '%s\n' "$dir"
 }
 
 # --- default build: info.plist and scripts/ in the archive, no icon ---
 dir=$(stage plain)
+mkdir -p "$dir/test" && printf 'x\n' > "$dir/test/x.test.sh"
 out=$(bash "$dir/build.sh" 2>&1)
 code=$?
 assert_eq "build exit code" "0" "$code"
@@ -41,7 +44,7 @@ refute_contains "no tests in the archive" "$listing" "test/"
 # execute bit.
 mode=$(zipinfo "$dir/$OUT" scripts/summarize.sh | awk '{print $1}')
 # breaks-if: build.sh stops setting the execute bit before zipping
-assert_eq "summarize.sh is executable inside the archive" "-rwxr-xr-x" "$mode"
+assert_eq "summarize.sh is executable inside the archive" "x" "$(printf '%s' "$mode" | cut -c4)"
 # The archive unpacks to a workflow whose plist is valid.
 mkdir -p "$dir/unpacked"
 (cd "$dir/unpacked" && unzip -q "../$OUT")
@@ -94,17 +97,22 @@ dir=$(stage nozip)
 out=$(PATH="$(bin nozip "${COMMON[@]}" unzip)" bash "$dir/build.sh" 2>&1)
 assert_eq "missing zip exit code" "1" "$?"
 assert_contains "missing zip message" "$out" "ERROR: zip not found on PATH"
-if [ -e "$dir/$OUT" ]; then
-  fail=$((fail + 1))
-  echo "FAIL: missing zip should write no archive"
-else
-  pass=$((pass + 1))
-fi
+refute_file "missing zip writes no archive" "$dir/$OUT"
 
 dir=$(stage nounzip)
 # breaks-if: the unzip check at the top of build.sh is removed
 out=$(PATH="$(bin nounzip "${COMMON[@]}" zip)" bash "$dir/build.sh" 2>&1)
 assert_eq "missing unzip exit code" "1" "$?"
 assert_contains "missing unzip message" "$out" "ERROR: unzip not found on PATH"
+refute_file "missing unzip writes no archive" "$dir/$OUT"
+
+# --- missing prompt.md: named ERROR, no archive written ---
+dir=$(stage noprompt)
+rm -f "$dir/prompt.md"
+# breaks-if: the required-file check in build.sh is removed
+out=$(bash "$dir/build.sh" 2>&1)
+assert_eq "missing prompt.md exit code" "1" "$?"
+assert_contains "missing prompt.md message" "$out" "ERROR: prompt.md not found"
+refute_file "missing prompt.md writes no archive" "$dir/$OUT"
 
 finish_tests

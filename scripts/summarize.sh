@@ -36,6 +36,9 @@ HINT_LOGIN='Run `claude` once in a terminal to log in.'
 # Fetched pages with less text than this are login walls, cookie banners or
 # pages built by JavaScript, so summarizing them would mislead.
 MIN_PAGE_CHARS=200
+# Largest page download in bytes. text.pl reads the whole page into memory,
+# so a bigger file fails as a curl error instead.
+MAX_PAGE_BYTES=20000000
 USER_AGENT='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15'
 
 jobs_dir() {
@@ -45,14 +48,18 @@ jobs_dir() {
 # ---------------------------------------------------------------- the view
 
 # Stops every job still around, for example one whose Text View was closed
-# while the backend was still running, and removes its directory.
+# while the backend was still running, and removes its directory. A job that
+# was killed or outlived a reboot leaves a stale pid behind, so the kill only
+# goes out when that pid still runs this job.
 stop_old_jobs() {
   local dir pid
   for dir in "$1"/job.*; do
     [ -d "$dir" ] || continue
     pid=$(cat "$dir/pid" 2>/dev/null)
     if [ -n "$pid" ] && [ ! -e "$dir/done" ]; then
-      kill -TERM -- "-$pid" 2>/dev/null
+      case "$(ps -ww -o command= -p "$pid" 2>/dev/null)" in
+        *"summarize.sh --run $dir") kill -TERM -- "-$pid" 2>/dev/null ;;
+      esac
     fi
     rm -rf "$dir"
   done
@@ -96,9 +103,17 @@ render() {
 }
 
 view() {
+  local root
   setup_env
   if [ -n "${sum_job:-}" ]; then
-    render "$sum_job"
+    root=$(jobs_dir)
+    # render deletes a finished job, so it only gets a direct child of the
+    # jobs directory. A stale or hand-set sum_job is "gone" instead.
+    case "$sum_job" in
+      "$root"/job.*/* | "$root"/job.) text_pl view-message "This summary is gone. Run it again from the keyword." ;;
+      "$root"/job.*) render "$sum_job" ;;
+      *) text_pl view-message "This summary is gone. Run it again from the keyword." ;;
+    esac
   else
     start_job "${1:-}"
   fi
@@ -169,8 +184,17 @@ load_config() {
 # ---- clipboard
 
 read_clipboard() {
-  local text host
-  text=$(tool_run SUM_PBPASTE pbpaste "$SUM_APP_TIMEOUT" 2>"$JOB/pbpaste.err" | text_pl trim) ||
+  local text host rc
+  # Into a file first, so the exit code tells a hung pbpaste (124 from the
+  # watchdog, with nothing on stderr) from one that failed.
+  tool_run SUM_PBPASTE pbpaste "$SUM_APP_TIMEOUT" >"$JOB/clip" 2>"$JOB/pbpaste.err"
+  rc=$?
+  if [ "$rc" -eq 124 ]; then
+    fail "The clipboard did not answer within $SUM_APP_TIMEOUT s (SUM_APP_TIMEOUT)."
+  elif [ "$rc" -ne 0 ]; then
+    fail "Could not read the clipboard: $(cat "$JOB/pbpaste.err")"
+  fi
+  text=$(text_pl trim <"$JOB/clip") ||
     fail "Could not read the clipboard: $(cat "$JOB/pbpaste.err")"
   [ -n "$text" ] || fail "Nothing to summarize."
   if host=$(text_pl url-host "$text"); then
@@ -197,7 +221,7 @@ fetch_page() {
   local url="$1" host="$2" meta rc code ctype charset text chars
   status "Fetching ${host}…"
   meta=$(tool_run SUM_CURL curl "$SUM_FETCH_TIMEOUT" -sS -L \
-    --max-time "$SUM_FETCH_TIMEOUT" -A "$USER_AGENT" -o "$JOB/page" \
+    --max-time "$SUM_FETCH_TIMEOUT" --max-filesize "$MAX_PAGE_BYTES" -A "$USER_AGENT" -o "$JOB/page" \
     -w '%{http_code}\n%{content_type}' "$url" 2>"$JOB/curl.err")
   rc=$?
   # 28 is curl's own --max-time; 124 is the watchdog catching a curl that
@@ -217,6 +241,13 @@ fetch_page() {
     '' | text/html* | application/xhtml*)
       charset=$(printf '%s\n' "$ctype" | sed -n 's/.*charset="\{0,1\}\([A-Za-z0-9_-]*\).*/\1/p')
       text=$(html_to_text "$charset" <"$JOB/page")
+      rc=$?
+      # Without this, a failed conversion reads as a page with no text.
+      if [ "$rc" -eq 124 ]; then
+        fail "Converting the page at $host timed out after $SUM_FETCH_TIMEOUT s (SUM_FETCH_TIMEOUT). $HINT_ACTIVE_WINDOW"
+      elif [ "$rc" -ne 0 ]; then
+        fail "Could not convert the page at $host to text. $HINT_ACTIVE_WINDOW"
+      fi
       ;;
     text/*) text=$(text_pl clean-text <"$JOB/page") ;;
     *) fail "$host sent ${ctype%%;*}, not a web page. $HINT_ACTIVE_WINDOW" ;;
@@ -408,8 +439,10 @@ run_job() {
   JOB="$1"
   [ -d "$JOB" ] || exit 1
   trap finish EXIT
-  # Bash runs a TERM trap only after the current foreground command ends,
-  # and timeout.pl ends right after passing the TERM on to the backend.
+  # Bash runs a TERM trap only after the current foreground command ends.
+  # timeout.pl passes the TERM on to the backend and exits once the backend
+  # has died, so a backend that ignores TERM holds the job until timeout.pl
+  # sends KILL a few seconds later.
   trap 'exit 143' TERM
   setup_env
   load_config

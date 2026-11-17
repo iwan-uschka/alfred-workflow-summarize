@@ -51,7 +51,7 @@ you set one.
 | Brave Browser | The selection, else the page text plus title and URL |
 | Mail | The one selected message: subject, sender and body |
 | Firefox | Nothing. Shows "Not supported in Firefox." |
-| Any other app | Nothing. Shows "Not supported in <app>." |
+| Any other app | Nothing. Shows `Not supported in <app>.` |
 
 Firefox offers no AppleScript access to its pages, and other apps have no
 common way to read their content, so the list is fixed. For a page in any
@@ -102,8 +102,8 @@ editor).
 | --- | --- | --- |
 | `SUM_MAX_CHARS` | `200000` | Longer input is cut to this many characters, and the Text View says so above the summary. |
 | `SUM_TIMEOUT` | `120` | Seconds the command may run. |
-| `SUM_FETCH_TIMEOUT` | `15` | Seconds for downloading a page from a clipboard URL. |
-| `SUM_APP_TIMEOUT` | `60` | Seconds an app may take to answer AppleScript. The first call waits for the macOS permission prompt, so keep this generous. |
+| `SUM_FETCH_TIMEOUT` | `15` | Seconds for downloading a page from a clipboard URL, and again for converting it to text. |
+| `SUM_APP_TIMEOUT` | `60` | Seconds an app may take to answer AppleScript, and the limit for reading the clipboard. The first AppleScript call waits for the macOS permission prompt, so keep this generous. |
 
 ## Messages
 
@@ -121,19 +121,28 @@ summary:
 | `Could not fetch <host>: <curl error>.` | No connection, an unknown host, a TLS problem. |
 | `Fetching <host> timed out after <n> s (SUM_FETCH_TIMEOUT).` | The page took too long. |
 | `<host> answered with HTTP <code>.` | The page returned an error, for example 403 or 404. |
+| `Could not convert the page at <host> to text.` | textutil failed on the downloaded page. |
+| `Converting the page at <host> timed out after <n> s (SUM_FETCH_TIMEOUT).` | textutil took too long on the downloaded page. |
 | `The page at <host> has too little text to summarize (<n> characters).` | Under 200 characters of text, typical for login walls and pages built by JavaScript. |
 | `<host> sent <type>, not a web page.` | The URL points to a PDF, an image or another file. |
 | `<app> does not allow JavaScript from Apple Events.` | Turn on the setting named in the message (see below). |
 | `Alfred may not control <app>.` | macOS denied the Automation permission (see below). |
 | `<app> did not answer within <n> s (SUM_APP_TIMEOUT).` | The app hung or a permission prompt waited too long. |
 | `Could not read <app>: <error>.` | Any other AppleScript error, for example a browser window without tabs. |
+| `Could not read the clipboard: <error>` | pbpaste failed. |
+| `The clipboard did not answer within <n> s (SUM_APP_TIMEOUT).` | pbpaste hung. |
+| `Could not read prompt.md.` | The bundled prompt file is missing or unreadable. Restore it or set "Prompt override". |
+| `Could not prepare the input for the command.` | The text helper failed while cutting the input. |
+| `Summarize stopped unexpectedly (exit code <n>).` | The job crashed. Its last stderr lines follow. |
+| `This summary is gone. Run it again from the keyword.` | The Text View asked for a job that no longer exists. |
+| `Pick the "Active window" or "Clipboard" row to summarize.` | Text typed into the Text View, or an unknown argument. |
 | `<VARIABLE> must be a whole number of 1 or more (got "<value>").` | A bullet count, `SUM_MAX_CHARS` or a timeout is not a positive whole number. |
 | `SUM_MIN_BULLETS (<a>) is larger than SUM_MAX_BULLETS (<b>).` | The bullet range is upside down. |
-| `SUM_COMMAND is empty.` | The Command setting is blank. |
+| `SUM_COMMAND is empty. Set it in the workflow's Configure Workflow screen.` | The Command setting is blank. |
 | `Input cut to <n> characters (SUM_MAX_CHARS).` | Shown above the summary when the input was longer than the limit. |
 
-The fetch messages (download error, timeout, HTTP error, too little text,
-not a web page) end with "Open the page in your browser and use the
+The fetch messages (download error, timeout, HTTP error, conversion error,
+too little text, not a web page) end with "Open the page in your browser and use the
 "Active window" row." The browser often gets a page that a plain download
 does not, for example behind a login.
 
@@ -156,8 +165,10 @@ Mail needs no extra setting.
 Everything the workflow reads goes to the configured command: page text,
 selections, clipboard contents and full mail bodies with sender and subject.
 With the default command, that is Claude Code, which sends it to Anthropic.
-If you set another command, it goes wherever that command sends it. Nothing
-is sent while the rows are shown. Sending starts only when you press Enter on
+If you set another command, it goes wherever that command sends it. When the
+clipboard holds a URL, the workflow also downloads that page itself with
+`curl`, so the site sees your IP address and the URL. Nothing is sent while
+the rows are shown. Sending starts only when you press Enter on
 a row, and the "not supported" and "Nothing to summarize." cases send
 nothing.
 

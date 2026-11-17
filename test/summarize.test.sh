@@ -50,6 +50,7 @@ summarize() {
     json=$(sum_job="$job" bash "$SCRIPT" "$1" 2>/dev/null)
     renders=$((renders + 1))
   done
+  [ "$i" -lt 400 ] || not_ok "summarize $1: still asking for a rerun after 400 renders"
   out=${fields#*$'\n'}
   final_job=${head#*|}
   calls=$(cat "$STUB_LOG")
@@ -60,7 +61,7 @@ window_app() { export sum_app_id="$1" sum_app_name="$2"; }
 
 osa_out() { printf '%s' "$1" >"$STUB_OSA_OUT_FILE"; }
 
-cmd_ran() { [[ "$calls" == *cmd* ]] && echo yes || echo no; }
+cmd_ran() { grep -qx cmd <<<"$calls" && echo yes || echo no; }
 
 jobs_left() { find "$JOBS" -mindepth 1 -maxdepth 1 2>/dev/null | wc -l | tr -d ' '; }
 
@@ -90,6 +91,8 @@ assert_contains "url: curl called with the URL" "$calls" "https://example.com/ti
 assert_contains "url: curl follows redirects" "$calls" " -L "
 assert_contains "url: curl gets the fetch timeout" "$calls" "--max-time 15 "
 assert_contains "url: curl sends a browser User-Agent" "$calls" "-A Mozilla/5.0"
+# breaks-if: the download size cap is removed and a huge page is read into memory
+assert_contains "url: curl caps the download size" "$calls" "--max-filesize 20000000 "
 stdin=$(cat "$STUBS/cmd.stdin")
 assert_contains "url: backend gets the URL line" "$stdin" "URL: https://example.com/tide-pools"
 assert_contains "url: backend gets the page text" "$stdin" "Volunteers counted 412 sea stars"
@@ -148,6 +151,7 @@ assert_eq "empty clipboard sends nothing" "no" "$(cmd_ran)"
 reset_stubs
 clip $' \n\t '
 summarize clipboard
+# breaks-if: read_clipboard stops trimming before its empty check
 assert_eq "whitespace-only clipboard message" "Nothing to summarize." "$out"
 
 reset_stubs
@@ -156,6 +160,17 @@ summarize clipboard
 # breaks-if: a failing pbpaste is read as an empty or valid clipboard
 assert_contains "pbpaste failure message" "$out" "Could not read the clipboard: pbpaste: no pasteboard"
 assert_eq "pbpaste failure sends nothing" "no" "$(cmd_ran)"
+
+reset_stubs
+clip "Text"
+export STUB_PBPASTE_HANG=1 SUM_APP_TIMEOUT=1
+start=$SECONDS
+summarize clipboard
+unset SUM_APP_TIMEOUT
+# breaks-if: the pbpaste watchdog or its timeout message is removed
+assert_eq "hanging pbpaste message" "The clipboard did not answer within 1 s (SUM_APP_TIMEOUT)." "$out"
+assert_eq "hanging pbpaste stops near the limit" "1" "$(( SECONDS - start < 10 ))"
+assert_eq "hanging pbpaste sends nothing" "no" "$(cmd_ran)"
 
 reset_stubs
 clip "https://unreachable.example/x"
@@ -200,6 +215,30 @@ summarize clipboard
 # breaks-if: non-text responses are run through the HTML converter
 assert_eq "non-text response message" "example.com sent application/pdf, not a web page. $HINT" "$out"
 
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/broken"
+export SUM_TEXTUTIL=/usr/bin/false
+summarize clipboard
+unset SUM_TEXTUTIL
+# breaks-if: a failed textutil is reported as a page with too little text
+assert_eq "conversion failure message" "Could not convert the page at example.com to text. $HINT" "$out"
+assert_eq "conversion failure sends nothing" "no" "$(cmd_ran)"
+
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/slow-convert"
+printf 'sleep 30\n' >"$STUBS/textutil-hang"
+export SUM_TEXTUTIL="/bin/bash $STUBS/textutil-hang" SUM_FETCH_TIMEOUT=1
+start=$SECONDS
+summarize clipboard
+unset SUM_TEXTUTIL SUM_FETCH_TIMEOUT
+# breaks-if: a textutil timeout (124) is reported as a generic conversion failure or as too little text
+assert_eq "conversion timeout message" \
+  "Converting the page at example.com timed out after 1 s (SUM_FETCH_TIMEOUT). $HINT" "$out"
+assert_eq "conversion timeout stops near the limit" "1" "$(( SECONDS - start < 10 ))"
+assert_eq "conversion timeout sends nothing" "no" "$(cmd_ran)"
+
 # The 200-character floor, counted on plain text so the count is exact.
 reset_stubs
 export STUB_CTYPE="text/plain"
@@ -220,6 +259,7 @@ reset_stubs
 printf '<html><body><script>%s</script><p>Hi.</p></body></html>' "$(printf 'x%.0s' $(seq 1 500))" >"$STUB_PAGE"
 clip "https://example.com/js-app"
 summarize clipboard
+# breaks-if: strip-html stops removing script tags before the length check
 assert_eq "script-only page is too little text" \
   "The page at example.com has too little text to summarize (3 characters). $HINT" "$out"
 
@@ -270,6 +310,7 @@ reset_stubs
 window_app com.apple.Safari Safari
 osa_out $'https://example.com/blank\nBlank\npage\n   \n'
 summarize window
+# breaks-if: a browser page with only whitespace is sent to the command
 assert_eq "empty page message" "Nothing to summarize." "$out"
 assert_eq "empty page sends nothing" "no" "$(cmd_ran)"
 
@@ -294,6 +335,7 @@ reset_stubs
 window_app com.apple.mail Mail
 osa_out "0"
 summarize window
+# breaks-if: Mail with no selected message is read as an empty message and sent
 assert_eq "Mail: nothing selected" "Nothing to summarize." "$out"
 assert_eq "Mail: nothing selected sends nothing" "no" "$(cmd_ran)"
 
@@ -301,6 +343,7 @@ reset_stubs
 window_app com.apple.mail Mail
 osa_out $'1\nNo body\nBob <bob@example.com>\n  \n'
 summarize window
+# breaks-if: a Mail message with a blank body is sent with only its headers
 assert_eq "Mail: empty body" "Nothing to summarize." "$out"
 
 # ===================================================== active window: refused apps
@@ -320,8 +363,11 @@ reset_stubs
 window_app "" ""
 front "" ""
 summarize window
+# breaks-if: read_window stops refusing when there is no front app
 assert_eq "no front app at all" "Nothing to summarize." "$out"
 assert_eq "no front app sends nothing" "no" "$(cmd_ran)"
+# breaks-if: front_app passes an empty ASN on to `lsappinfo info`
+refute_contains "no front app skips lsappinfo info" "$calls" "lsappinfo info"
 
 reset_stubs
 unset sum_app_id sum_app_name
@@ -346,6 +392,7 @@ reset_stubs
 window_app com.brave.Browser "Brave Browser"
 export STUB_OSA_ERR="Ausführungsfehler: Das Ausführen von JavaScript über AppleScript ist deaktiviert. (12)"
 summarize window
+# breaks-if: apple_error matches whole English sentences instead of JavaScript plus AppleScript
 assert_eq "Brave JavaScript off, German message" "Brave Browser does not allow JavaScript from Apple Events. Turn on View > Developer > Allow JavaScript from Apple Events." "$out"
 
 reset_stubs
@@ -367,6 +414,7 @@ reset_stubs
 window_app com.apple.Safari Safari
 export STUB_OSA_ERR="execution error: Safari got an error: Can't get window 1. (-1719)"
 summarize window
+# breaks-if: apple_error drops the original error text for errors it does not recognize
 assert_eq "other AppleScript error" "Could not read Safari: execution error: Safari got an error: Can't get window 1. (-1719)" "$out"
 
 reset_stubs
@@ -430,6 +478,7 @@ assert_contains "claude as first word reaches the stub (zsh function)" "$out" "T
     [ "$(command_name)" = "${pair#*|}" ] && echo ok || echo "FAIL: command_name [$SUM_COMMAND] gave [$(command_name)]"
   done ) >"$STUBS/names"
 assert_eq "command_name picks the first word without its directory" "0" "$(grep -c FAIL "$STUBS/names")"
+assert_eq "command_name cases all ran and passed" "6" "$(grep -c '^ok$' "$STUBS/names")"
 
 reset_stubs
 clip "Text"
@@ -441,7 +490,10 @@ unset SUM_TIMEOUT
 assert_eq "command timeout" "The command timed out after 1 s (SUM_TIMEOUT)." "$out"
 assert_eq "command timeout stops near the limit" "1" "$(( SECONDS - start < 10 ))"
 sleep 0.2
-if kill -0 "$(cat "$STUBS/cmd.pid")" 2>/dev/null; then
+pid=$(cat "$STUBS/cmd.pid" 2>/dev/null)
+if [ -z "$pid" ]; then
+  not_ok "the hanging command never recorded its pid"
+elif kill -0 "$pid" 2>/dev/null; then
   not_ok "a timed-out command should be killed"
 else
   ok
@@ -497,13 +549,16 @@ clip "Text"
 export STUB_CMD_MODE=hang
 old=$(sum_job="" bash "$SCRIPT" clipboard | json_get '$d->{variables}{sum_job}')
 for _ in $(seq 1 50); do [ -s "$STUBS/cmd.pid" ] && break; sleep 0.1; done
-old_pid=$(cat "$STUBS/cmd.pid")
+old_pid=$(cat "$STUBS/cmd.pid" 2>/dev/null)
+assert_eq "the old job's command recorded its pid" "yes" "$([ -n "$old_pid" ] && echo yes || echo no)"
 unset STUB_CMD_MODE
 rm -f "$STUBS/cmd.pid"
 summarize clipboard
 sleep 0.3
 # breaks-if: stop_old_jobs is no longer called when a job starts
-if kill -0 "$old_pid" 2>/dev/null; then
+if [ -z "$old_pid" ]; then
+  not_ok "the old job's command never recorded its pid"
+elif kill -0 "$old_pid" 2>/dev/null; then
   not_ok "starting a job should stop the old job's command"
   kill "$old_pid" 2>/dev/null
 else
@@ -511,6 +566,26 @@ else
 fi
 refute_file "old job directory removed" "$old"
 assert_contains "new job still runs" "$out" "TL;DR: stub summary."
+
+# A stale job whose pid now belongs to another process group: that group
+# survives, and the stale directory still goes.
+reset_stubs
+clip "Text"
+mkdir -p "$JOBS/job.stale"
+/usr/bin/perl -e 'setpgrp(0, 0); exec @ARGV' sleep 30 &
+other_pid=$!
+printf '%s\n' "$other_pid" >"$JOBS/job.stale/pid"
+summarize clipboard
+# breaks-if: stop_old_jobs kills the pid in a stale job directory without checking what runs there
+if kill -0 "$other_pid" 2>/dev/null; then
+  ok
+  kill "$other_pid" 2>/dev/null
+else
+  not_ok "a stale job's pid should not be killed when another process holds it"
+fi
+wait "$other_pid" 2>/dev/null
+refute_file "stale job directory removed" "$JOBS/job.stale"
+assert_contains "new job runs after a stale one" "$out" "TL;DR: stub summary."
 
 # ===================================================== prompt assembly
 
@@ -572,6 +647,23 @@ SUM_COMMAND="   " summarize clipboard
 # breaks-if: a blank SUM_COMMAND runs zsh with nothing and reports an empty summary
 assert_eq "blank command" "SUM_COMMAND is empty. Set it in the workflow's Configure Workflow screen." "$out"
 
+reset_stubs
+clip "Text"
+SUM_COMMAND="" summarize clipboard
+# breaks-if: load_config treats an empty SUM_COMMAND like an unset one and runs the default command
+assert_eq "empty command" "SUM_COMMAND is empty. Set it in the workflow's Configure Workflow screen." "$out"
+assert_eq "empty command sends nothing" "no" "$(cmd_ran)"
+
+reset_stubs
+clip "Text"
+saved_command=$SUM_COMMAND
+unset SUM_COMMAND
+ZDOTDIR="$ZDIR" summarize clipboard
+export SUM_COMMAND=$saved_command
+# breaks-if: an unset SUM_COMMAND no longer falls back to the default command
+assert_contains "unset command runs the default (claude through the stub)" "$out" "TL;DR: stub summary."
+assert_eq "unset command reaches the backend" "yes" "$(cmd_ran)"
+
 # ===================================================== the view protocol
 
 reset_stubs
@@ -585,6 +677,19 @@ out=$(sum_job="$JOBS/job.gone" bash "$SCRIPT" clipboard)
 # breaks-if: render keeps polling a job directory that no longer exists
 assert_eq "missing job message" "This summary is gone. Run it again from the keyword." "$(printf '%s' "$out" | json_get '$d->{response}')"
 assert_eq "missing job asks for no rerun" "" "$(printf '%s' "$out" | json_get 'exists $d->{rerun} ? "rerun" : ""')"
+
+# A sum_job outside the jobs directory, or escaping it with "..", is never
+# rendered, so a finished-looking directory there is never deleted.
+mkdir -p "$STUBS/victim" "$JOBS/job.x"
+: >"$STUBS/victim/done"
+for bad in "$STUBS/victim" "$JOBS/job.x/../../../victim"; do
+  out=$(sum_job="$bad" bash "$SCRIPT" clipboard)
+  # breaks-if: view hands any sum_job to render, which deletes it once it has a done file
+  assert_file "sum_job '$bad' is not deleted" "$STUBS/victim/done"
+  assert_eq "sum_job '$bad' message" "This summary is gone. Run it again from the keyword." "$(printf '%s' "$out" | json_get '$d->{response}')"
+  assert_eq "sum_job '$bad' is cleared" "" "$(printf '%s' "$out" | json_get '$d->{variables}{sum_job}')"
+done
+rm -rf "$STUBS/victim" "$JOBS/job.x"
 
 # ===================================================== broken scripts still answer
 
@@ -623,6 +728,44 @@ SCRIPT="$STUBS/staged/scripts/summarize.sh" summarize clipboard
 assert_eq "missing prompt.md" "Could not read prompt.md." "$out"
 assert_eq "missing prompt.md sends nothing" "no" "$(cmd_ran)"
 
+# ===================================================== lib.sh: setup_env
+
+home="$STUBS/home"
+mkdir -p "$home/.local/bin" "$home/.volta/bin" "$STUBS/npm/bin"
+# lib_env PREFIX: PATH and LANG after setup_env, as "PATH|LANG".
+lib_env() {
+  HOME="$home" NPM_CONFIG_PREFIX="$1" PATH=/usr/bin:/bin LANG=C /bin/bash -c \
+    'source "$1/scripts/lib.sh"; setup_env; printf "%s|%s" "$PATH" "$LANG"' _ "$ROOT"
+}
+out=$(lib_env "")
+assert_contains "setup_env prepends an existing dir, in list order" "$out" "$home/.local/bin:$home/.volta/bin:"
+assert_contains "setup_env keeps the old PATH at the end" "$out" ":/usr/bin:/bin|"
+# breaks-if: setup_env prepends directories that do not exist
+refute_contains "setup_env skips a missing dir" "$out" "$home/.claude/local"
+# breaks-if: setup_env adds "/bin" for an empty NPM_CONFIG_PREFIX
+refute_contains "setup_env skips an empty NPM_CONFIG_PREFIX" "$out" ":/bin:/usr/bin"
+assert_contains "setup_env exports a UTF-8 locale" "$out" "|en_US.UTF-8"
+out=$(lib_env "$STUBS/npm")
+assert_contains "setup_env adds NPM_CONFIG_PREFIX/bin when set" "$out" "$home/.volta/bin:$STUBS/npm/bin:"
+
+# ===================================================== lib.sh: tool_run
+
+# lib_tool VALUE ARGS...: runs tool_run SUM_X ARGS under set -u, with SUM_X set
+# to VALUE.
+lib_tool() {
+  local value="$1"
+  shift
+  SUM_X="$value" /bin/bash -c 'set -u; source "$1/scripts/lib.sh"; shift; tool_run SUM_X "$@"' _ "$ROOT" "$@"
+}
+assert_eq "tool_run runs the tool in VAR" "hi-" "$(lib_tool 'printf %s-' echo 5 hi)"
+# breaks-if: tool_run ignores DEFAULT when VAR is empty
+assert_eq "tool_run falls back to DEFAULT for an empty VAR" "hi" "$(lib_tool "" echo 5 hi)"
+# breaks-if: the empty-words guard in tool_run goes and set -u aborts on a blank VAR
+assert_eq "tool_run falls back to DEFAULT for a blank VAR" "hi" "$(lib_tool " " echo 5 hi 2>&1)"
+# breaks-if: tool_run stops running the tool under timeout.pl
+lib_tool "" sleep 1 5 >/dev/null 2>&1
+assert_eq "tool_run exits 124 when the tool runs too long" "124" "$?"
+
 # ===================================================== info.plist wiring
 
 PLIST="$ROOT/info.plist"
@@ -644,5 +787,14 @@ for pair in SUM_MAX_CHARS:200000 SUM_TIMEOUT:120 SUM_FETCH_TIMEOUT:15 SUM_APP_TI
 done
 configured=$(plutil -convert json -o - "$PLIST" | json_get 'join ",", map { $_->{variable} } @{$d->{userconfigurationconfig}}')
 assert_eq "Configure Workflow fields" "SUM_KEYWORD,SUM_COMMAND,SUM_MODEL,SUM_LANGUAGE,SUM_MIN_BULLETS,SUM_MAX_BULLETS,SUM_PROMPT_OVERRIDE" "$configured"
+# The indices follow the field order the assertion above pins.
+for entry in 2:SUM_MODEL:sonnet 4:SUM_MIN_BULLETS:3 5:SUM_MAX_BULLETS:10; do
+  idx=${entry%%:*}
+  pair=${entry#*:}
+  var=${pair%%:*}
+  # breaks-if: a Configure Workflow default in info.plist drifts from the fallback in summarize.sh
+  assert_eq "plist default $var" "${pair#*:}" "$(plutil -extract "userconfigurationconfig.$idx.config.default" raw -o - "$PLIST")"
+  assert_contains "script default $var" "$(grep -F "$var=\"\${$var:-" "$SCRIPT")" ":-${pair#*:}}"
+done
 
 finish_tests

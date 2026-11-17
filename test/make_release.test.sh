@@ -63,6 +63,17 @@ assert_eq "two-part version exit code" "1" "$code"
 assert_contains "two-part version message" "$out" "error: version must be x.y.z (got '1.2')"
 assert_eq "rejected version leaves info.plist alone" "$BASE_VERSION" "$(plist_version "$dir")"
 
+for bad in 1.2.3.4 v1.2.0 1.2.x ""; do
+  # breaks-if: the x.y.z regex loses its ^ or $ anchor or accepts a non-digit part
+  run_release "$dir" "$bad"
+  assert_eq "bad version '$bad' exit code" "1" "$code"
+  if [ -n "$bad" ]; then
+    assert_contains "bad version '$bad' message" "$out" "error: version must be x.y.z (got '$bad')"
+  else
+    assert_contains "empty version message" "$out" "error: version required"
+  fi
+done
+
 # --- dirty working tree ---
 dir=$(new_repo dirty)
 printf 'scratch\n' > "$dir/scratch.txt"
@@ -112,6 +123,15 @@ else
   not_ok "shasum -c should verify the asset next to its checksum file"
 fi
 assert_contains "next steps name the tag" "$out" "gh release create v1.2.0"
+assert_contains "next steps target the current branch" "$out" '--target "main"'
+
+# --- the release targets the branch that carries the bump ---
+dir=$(new_repo feature)
+git -C "$dir" checkout -q -b feat/x
+# breaks-if: the printed gh release create step drops --target and tags the default branch
+run_release "$dir" 1.2.0
+assert_eq "feature branch release exit code" "0" "$code"
+assert_contains "next steps target the feature branch" "$out" '--target "feat/x"'
 
 # --- build.sh fails: info.plist restored, no versioned artifact left ---
 dir=$(new_repo buildfail)

@@ -34,14 +34,17 @@ refute_file() {
 }
 
 # json_get EXPR: evaluates a Perl expression on the decoded JSON from stdin,
-# with the data in $d. Prints INVALID_JSON when stdin is not one JSON value.
+# with the data in $d. Prints INVALID_JSON when stdin is not one JSON value,
+# and EVAL_ERROR plus Perl's message when EXPR itself fails.
 json_get() {
   /usr/bin/perl -MJSON::PP -e '
     local $/; my $raw = <STDIN>;
-    my $d = eval { JSON::PP->new->utf8->decode($raw) };
-    unless (defined $d) { print "INVALID_JSON"; exit 0 }
+    my ($d, $ok);
+    $ok = eval { $d = JSON::PP->new->utf8->allow_nonref->decode($raw); 1 };
+    unless ($ok) { print "INVALID_JSON"; exit 0 }
     binmode STDOUT, ":encoding(UTF-8)";
     my $v = eval $ARGV[0];
+    if ($@) { print "EVAL_ERROR: $@"; exit 0 }
     print defined $v ? $v : "";
   ' "$1"
 }
