@@ -102,6 +102,74 @@ out=$(TP view-running "$WORK/partial-job")
 assert_eq "view-running with a cut-off character exits 0" "0" "$?"
 assert_contains "view-running still shows the output so far" "$out" "TL;DR: half"
 
+# --- view-running and view-final: no remote resources in the output ---
+# view MODE TEXT: the Text View response for a job whose output is TEXT.
+mkdir -p "$WORK/view-job"
+view() {
+  printf '%s' "$2" >"$WORK/view-job/out"
+  # shellcheck disable=SC2016 # Perl code, not shell
+  TP "$1" "$WORK/view-job" | json_get '$d->{response}'
+}
+plain=$'TL;DR: Sales rose 4% [see table] (Q3).\n\n- a < b and c > d.\n- Use `x` and *y*, 3! [1]'
+assert_eq "view-final leaves a plain summary unchanged" "$plain" "$(view view-final "$plain")"
+assert_eq "view-running leaves a plain summary unchanged" "$plain" "$(view view-running "$plain")"
+# breaks-if: view-final shows the command's output without no_remote
+assert_eq "image becomes a label" "a [image: x] b" "$(view view-final 'a ![x](http://127.0.0.1:8000/probe?d=secret) b')"
+# breaks-if: view-running shows the command's output without no_remote
+assert_eq "image becomes a label while running" "[image: x]" "$(view view-running '![x](http://127.0.0.1:8000/probe)')"
+# breaks-if: no_remote stops stripping HTML tags
+assert_eq "HTML tags are stripped" "x  y bold" "$(view view-final 'x <img src="https://e.invalid/p.png"> y <b>bold</b>')"
+# breaks-if: neither the tag rule nor the outer loop repeats, so removing an inner tag rebuilds an outer one
+assert_eq "a tag rebuilt by removing an inner tag is stripped" "a  b" "$(view view-final 'a <<b>img src="https://e.invalid/p"> b')"
+# breaks-if: the passes run once, so a link rewrite that joins a tag leaves it in place
+assert_eq "a tag rebuilt by a link rewrite is stripped" "a  b" "$(view view-final 'a <[img](u) src="https://e.invalid/p"> b')"
+# breaks-if: the HTML comment rule is removed
+assert_eq "HTML comments are stripped" "a  b" "$(view view-final 'a <!-- <img src=x> --> b')"
+# breaks-if: the autolink rule is removed and the tag rule deletes the whole address
+assert_eq "autolink keeps its URL as text" "see https://e.invalid/x" "$(view view-final 'see <https://e.invalid/x>')"
+assert_eq "mailto autolink keeps its address as text" "mail mailto:a@e.invalid" "$(view view-final 'mail <mailto:a@e.invalid>')"
+# breaks-if: links keep their destination and stay live
+assert_eq "link keeps only its text" "See docs now." "$(view view-final 'See [docs](https://e.invalid/a_(b)) now.')"
+# breaks-if: $BRACKETS stops crossing a single line break and a two-line link stays live
+assert_eq "link text across two lines" $'See do\ncs now.' "$(view view-final $'See [do\ncs](https://e.invalid) now.')"
+# breaks-if: $BRACKETS ignores backslash escapes and a link with \] in its text stays live
+assert_eq "link text with an escaped bracket" 'See a\]b now.' "$(view view-final 'See [a\]b](https://e.invalid) now.')"
+# breaks-if: reference definitions keep their [label]: syntax and a reference link becomes live
+assert_eq "reference definition loses its syntax" $'See [docs][1].\n\n1: https://e.invalid/p.png' \
+  "$(view view-final $'See [docs][1].\n\n[1]: https://e.invalid/p.png')"
+assert_eq "indented definition in a quote loses its syntax" '>     r: https://e.invalid/p' "$(view view-final '>     [r]: https://e.invalid/p')"
+assert_eq "shortcut image becomes a label" $'[image: r]\n\nr: https://e.invalid/p.png' \
+  "$(view view-final $'![r]\n\n[r]: https://e.invalid/p.png')"
+# breaks-if: the link pass stops matching nested brackets
+assert_eq "image inside a link" "[image: badge]" "$(view view-final '[![badge](https://e.invalid/b.svg)](https://e.invalid)')"
+# breaks-if: the image pass runs only once
+assert_eq "image inside an image" "[image: outer [image: inner] text]" "$(view view-final '![outer ![inner](u2) text](u1)')"
+# breaks-if: the link rule matches a label followed by brackets again, as a reference link
+assert_eq "two images side by side" "[image: a][image: b]" "$(view view-final '![a](u)![b](v)')"
+# breaks-if: $BRACKETS stops crossing a single line break and a two-line image keeps its URL
+assert_eq "image alt text across two lines" $'[image: a\nb]' "$(view view-final $'![a\nb](https://e.invalid/p)')"
+# breaks-if: $LINE lets brackets cross a blank line, which Markdown never does
+assert_eq "a blank line ends the alt text" $'![a\n\nb]' "$(view view-final $'![a\n\nb]')"
+# breaks-if: an image cut off at a chunk boundary is shown with its URL until it completes
+assert_eq "unterminated image while streaming" "s [image: alt]" "$(view view-running 's ![alt](https://e.invalid/?d=sec')"
+# breaks-if: the tail rule for an image cut inside its alt text is removed
+assert_eq "image cut inside its alt text" "s [image: al]" "$(view view-running 's ![al')"
+assert_eq "image cut inside two-line alt text" $'s [image: al\nt]' "$(view view-running $'s ![al\nt')"
+# breaks-if: the image rule requires a destination after the alt text
+assert_eq "image cut between alt and URL" "s [image: alt]" "$(view view-running 's ![alt]')"
+# breaks-if: $DEST requires its closing parenthesis and a cut-off link shows its URL
+assert_eq "unterminated link while streaming" "s docs" "$(view view-running 's [docs](https://e.invalid/?d=sec')"
+# breaks-if: an HTML tag cut off at a chunk boundary is shown until its > arrives
+assert_eq "unterminated HTML tag while streaming" "s" "$(view view-running 's <img src="https://e.invalid/p')"
+# breaks-if: the comment rule needs its --> and a cut-off comment shows its tag
+assert_eq "unterminated HTML comment while streaming" "s" "$(view view-running 's <!-- <img src=x')"
+rm -f "$WORK/view-job/out"
+printf 'The command failed with exit code 1.\n<img src="https://e.invalid/p"> ![e](https://e.invalid/q)\n' >"$WORK/view-job/msg"
+# breaks-if: the command's stderr in msg skips no_remote
+# shellcheck disable=SC2016 # Perl code, not shell
+assert_eq "stderr in the failure message is cleaned too" $'The command failed with exit code 1.\n [image: e]' \
+  "$(TP view-final "$WORK/view-job" | json_get '$d->{response}')"
+
 # --- clean-text ---
 assert_eq "line separators become newlines, blank runs squeeze to one" \
   $'a\nb\n\nc' "$(printf 'a\xe2\x80\xa8b\n\n\n\n  \nc  \n' | TP clean-text)"

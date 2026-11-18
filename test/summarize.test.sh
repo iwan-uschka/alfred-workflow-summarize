@@ -93,6 +93,12 @@ assert_contains "url: curl gets the fetch timeout" "$calls" "--max-time 15 "
 assert_contains "url: curl sends a browser User-Agent" "$calls" "-A Mozilla/5.0"
 # breaks-if: the download size cap is removed and a huge page is read into memory
 assert_contains "url: curl caps the download size" "$calls" "--max-filesize 20000000 "
+# breaks-if: -q moves off the first position, where curl needs it to skip ~/.curlrc
+assert_eq "url: curl ignores ~/.curlrc" "curl -q " "$(grep '^curl ' <<<"$calls" | cut -c 1-8)"
+# breaks-if: --proto or --proto-redir is dropped and a redirect to ftp or file is followed
+assert_contains "url: curl fetches only http and https" "$calls" " --proto =http,https --proto-redir =http,https "
+# breaks-if: the redirect limit is dropped and curl follows up to 50 redirects
+assert_contains "url: curl follows at most 5 redirects" "$calls" " --max-redirs 5 "
 stdin=$(cat "$STUBS/cmd.stdin")
 assert_contains "url: backend gets the URL line" "$stdin" "URL: https://example.com/tide-pools"
 assert_contains "url: backend gets the page text" "$stdin" "Volunteers counted 412 sea stars"
@@ -104,6 +110,15 @@ cp "$FIXTURES/article.html" "$STUB_PAGE"
 clip $'\n   https://example.com/x   \n'
 summarize clipboard
 assert_contains "url with surrounding whitespace is fetched" "$calls" "curl"
+
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/page[1-99999999]{a,b}"
+summarize clipboard
+# breaks-if: --globoff is dropped and curl expands the brackets into one request per number
+assert_contains "url: curl turns off URL globbing" "$calls" " --globoff "
+assert_eq "url: a URL with brackets reaches curl unexpanded, as the last argument" \
+  " https://example.com/page[1-99999999]{a,b}" "$(grep '^curl ' <<<"$calls" | grep -o ' [^ ]*$')"
 
 reset_stubs
 clip $'https://example.com/x\nNotes about the page.'
@@ -463,12 +478,18 @@ clip "Text"
 export STUB_CMD_MODE=fail
 ZDOTDIR="$ZDIR" SUM_COMMAND='claude -p --model "$SUM_MODEL"' summarize clipboard
 # breaks-if: the login hint is dropped, or keyed to something other than the first word
-assert_eq "claude failure adds the login hint" $'The command failed with exit code 3.\nstub: not logged in\nRun `claude` once in a terminal to log in.' "$out"
+assert_eq "claude failure adds the login hint" $'The command failed with exit code 3.\nstub: not logged in\nRun `claude` once in a terminal to log in, or update `claude` if it rejected an option.' "$out"
 
 reset_stubs
 clip "Text"
 ZDOTDIR="$ZDIR" SUM_COMMAND='claude -p' summarize clipboard
 assert_contains "claude as first word reaches the stub (zsh function)" "$out" "TL;DR: stub summary."
+
+reset_stubs
+clip "Text"
+SUM_COMMAND="printf 'TL;DR: x.\n\n- ![x](http://127.0.0.1:8000/probe) <img src=\"http://127.0.0.1:8000/p\">\n'" summarize clipboard
+# breaks-if: summarize.sh renders the command's output without the view helpers' cleanup
+assert_eq "an image in the command's output is never shown as one" $'TL;DR: x.\n\n- [image: x]' "$out"
 
 # shellcheck source=scripts/summarize.sh
 ( source "$SCRIPT"
@@ -596,6 +617,7 @@ prompt=$(cat "$STUBS/cmd.prompt")
 assert_contains "default prompt is prompt.md" "$prompt" "One line that starts with \"TL;DR:\""
 assert_contains "default bullet range" "$prompt" "Between 3 and 10 bullet points"
 assert_contains "default language follows the input" "$prompt" "Write in the same language as the input."
+assert_contains "default prompt asks for no links or images" "$prompt" "Do not include links, images or HTML."
 refute_contains "no placeholder left" "$prompt" "{"
 assert_eq "default model" "sonnet" "$(cat "$STUBS/cmd.model")"
 
@@ -780,7 +802,8 @@ assert_eq "summarize.sh starts with a bash shebang" "#!/bin/bash" "$(head -n 1 "
 plist_cmd=$(plutil -extract userconfigurationconfig.1.config.default raw -o - "$PLIST")
 lib_cmd=$(source "$ROOT/scripts/lib.sh" && printf '%s' "$DEFAULT_COMMAND")
 assert_eq "plist default command matches the script's" "$lib_cmd" "$plist_cmd"
-assert_eq "default command" 'claude -p --model "$SUM_MODEL" --tools "" --no-session-persistence --system-prompt "$SUM_PROMPT"' "$plist_cmd"
+# breaks-if: --strict-mcp-config is dropped and the backend loads the user's MCP servers
+assert_eq "default command" 'claude -p --model "$SUM_MODEL" --tools "" --strict-mcp-config --no-session-persistence --system-prompt "$SUM_PROMPT"' "$plist_cmd"
 for pair in SUM_MAX_CHARS:200000 SUM_TIMEOUT:120 SUM_FETCH_TIMEOUT:15 SUM_APP_TIMEOUT:60; do
   assert_eq "advanced default ${pair%%:*}" "${pair#*:}" "$(plutil -extract "variables.${pair%%:*}" raw -o - "$PLIST")"
   assert_contains "script default ${pair%%:*}" "$(grep -F "${pair%%:*}=\"\${${pair%%:*}:-" "$SCRIPT")" ":-${pair#*:}}"

@@ -27,7 +27,8 @@ sum [filter]  ->  Script Filter (rows.sh)  ->  Text View, script input (summariz
 - `scripts/summarize.sh`: the Text View script and the background job.
 - `scripts/text.pl`: text helpers in core Perl. Trimming, URL detection,
   the clipboard preview, cutting to a length in characters, HTML stripping,
-  prompt filling, and all JSON output.
+  prompt filling, removing Markdown images, links and HTML tags from the
+  command's output (`no_remote`), and all JSON output.
 - `scripts/timeout.pl`: `timeout(1)` for macOS. Exit 124 on timeout, kills
   the command's whole process group, passes a TERM on to that group.
 - `test/`: shell tests, see below. `test/fixtures/` holds small hand-written
@@ -65,9 +66,12 @@ same script-input Text View. Alfred does not document these numbers.
   directory (`mktemp -d`) as its working directory. The job deletes that
   directory when it ends.
 - stdin: the text, already cut to `SUM_MAX_CHARS` characters. stdout: the
-  summary, shown as it arrives. A non-zero exit shows the exit code and
-  stderr, plus a login hint when the command's first word, without its
-  directory, is `claude`.
+  summary, shown as it arrives. `text.pl` turns Markdown images into
+  "[image: alt]" labels, keeps only the text of links and strips HTML tags,
+  in stdout and in the stderr it shows, so the output loads nothing remote. A
+  non-zero exit shows the exit code and stderr, plus a hint to log in or
+  update `claude` when the command's first word, without its directory, is
+  `claude`.
 - Environment: `SUM_MODEL` and `SUM_PROMPT` (the finished prompt), on top of
   the workflow's variables. PATH has `/opt/homebrew/bin`, `/usr/local/bin`,
   `~/.local/bin`, `~/.claude/local`, `~/.npm-global/bin`, `~/.volta/bin` and

@@ -15,8 +15,9 @@
 #                                   and {language} filled in
 #   text.pl items QUERY WINDOW_SUBTITLE CLIPBOARD_SUBTITLE APP_ID APP_NAME
 #                                   Script Filter JSON with the two rows
-#   text.pl view-running JOB_DIR    Text View JSON for a job still running
-#   text.pl view-final JOB_DIR      Text View JSON for a finished job
+#   text.pl view-running JOB_DIR    Text View JSON for a job still running, without
+#                                   Markdown images, live links or HTML tags
+#   text.pl view-final JOB_DIR      the same for a finished job
 #   text.pl view-message TEXT       Text View JSON holding only TEXT
 #
 # Characters, not bytes: everything except strip-html decodes stdin as UTF-8,
@@ -95,6 +96,37 @@ sub json_out {
 }
 
 sub join_parts { return join "\n\n", grep { length } map { trim($_) } @_ }
+
+# The command's output derives from text an attacker may have written, and
+# the Text View may render Markdown. So no image, link or HTML tag in it may
+# point at a remote resource. Images become "[image: alt]", links keep only
+# their text, and reference definitions and HTML tags lose their syntax. A
+# construct cut off at the end while the command still prints gets the same
+# treatment, so the text keeps its shape when the rest arrives. Removing one
+# construct can join the text around it into another, so the passes repeat
+# until nothing changes. Each change removes a "<", "!" or "[", so they end.
+# Bracketed text may span lines, but not a blank line, as in Markdown, and a
+# backslash escapes the next character. With every reference definition
+# broken, a reference link is plain text, so only inline links need a rule.
+my $LINE     = qr/[^\[\]\n\\]++|\\[^\n]?|\n(?![ \t]*\n)/;
+my $BRACKETS = qr/(\[(?:$LINE|(?-1))*+\])/;
+my $DEST     = qr/\((?:[^()\n]++|\([^()\n]*\))*+\)?/;
+
+sub no_remote {
+    my ($s) = @_;
+    my $before;
+    do {
+        $before = $s;
+        $s =~ s/<!--.*?(?:-->|\z)//sg;
+        $s =~ s/<((?:https?|mailto):[^<>\s]*)>/$1/gi;
+        1 while $s =~ s/<[\/!?]?[A-Za-z][^<>]*(?:>|\z)//;
+        $s =~ s/\[((?:[^\[\]\\]|\\.)+)\]:/$1:/sg;
+        1 while $s =~ s/(?<!!)$BRACKETS$DEST/substr($1, 1, -1)/e;
+        1 while $s =~ s/!$BRACKETS(?:$DEST|\[[^\]\n]*\]?)?/'[image: ' . substr($1, 1, -1) . ']'/e;
+        $s =~ s/!\[((?:$LINE)*)\z/[image: $1]/;
+    } while $s ne $before;
+    return $s;
+}
 
 my %commands = (
     'trim' => sub { out_text(trim(stdin_text())) },
@@ -185,7 +217,7 @@ my %commands = (
     'view-running' => sub {
         my ($job) = @_;
         my $job_chars = utf8_in($job);   # for JSON only; keep $job (bytes) for file paths
-        my $body = read_file("$job/out");
+        my $body = no_remote(read_file("$job/out"));
         $body = read_file("$job/status") unless length trim($body);
         json_out({
             rerun     => $RERUN,
@@ -198,8 +230,8 @@ my %commands = (
     'view-final' => sub {
         my ($job) = @_;
         json_out({
-            response  => join_parts(read_file("$job/notice"), read_file("$job/out"),
-                                    read_file("$job/msg")),
+            response  => join_parts(read_file("$job/notice"),
+                                    map { no_remote(read_file("$job/$_")) } qw(out msg)),
             variables => { sum_job => '' },
             behaviour => { response => 'replace', scroll => 'start' },
         });
