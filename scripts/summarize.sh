@@ -148,11 +148,16 @@ fail() {
 
 status() { printf '%s\n' "$1" >"$JOB/status"; }
 
-# need_count NAME VALUE: VALUE must be a whole number of 1 or more.
+# need_count NAME VALUE MAX: VALUE must be a whole number from 1 to MAX.
+# Comparing lengths first keeps a value past 64 bits away from `[ -gt ]`,
+# which can't read it.
 need_count() {
   case "$2" in
     '' | *[!0-9]* | 0 | 0*) fail "$1 must be a whole number of 1 or more (got \"$2\")." ;;
   esac
+  if [ "${#2}" -gt "${#3}" ] || [ "$2" -gt "$3" ]; then
+    fail "$1 must be $3 or less (got \"$2\")."
+  fi
 }
 
 load_config() {
@@ -166,12 +171,13 @@ load_config() {
   SUM_TIMEOUT="${SUM_TIMEOUT:-120}"
   SUM_FETCH_TIMEOUT="${SUM_FETCH_TIMEOUT:-15}"
   SUM_APP_TIMEOUT="${SUM_APP_TIMEOUT:-60}"
-  need_count SUM_MIN_BULLETS "$SUM_MIN_BULLETS"
-  need_count SUM_MAX_BULLETS "$SUM_MAX_BULLETS"
-  need_count SUM_MAX_CHARS "$SUM_MAX_CHARS"
-  need_count SUM_TIMEOUT "$SUM_TIMEOUT"
-  need_count SUM_FETCH_TIMEOUT "$SUM_FETCH_TIMEOUT"
-  need_count SUM_APP_TIMEOUT "$SUM_APP_TIMEOUT"
+  # The timeouts stop at 100000000 seconds, the most timeout.pl accepts.
+  need_count SUM_MIN_BULLETS "$SUM_MIN_BULLETS" 100
+  need_count SUM_MAX_BULLETS "$SUM_MAX_BULLETS" 100
+  need_count SUM_MAX_CHARS "$SUM_MAX_CHARS" 10000000
+  need_count SUM_TIMEOUT "$SUM_TIMEOUT" 100000000
+  need_count SUM_FETCH_TIMEOUT "$SUM_FETCH_TIMEOUT" 100000000
+  need_count SUM_APP_TIMEOUT "$SUM_APP_TIMEOUT" 100000000
   if [ "$SUM_MIN_BULLETS" -gt "$SUM_MAX_BULLETS" ]; then
     fail "SUM_MIN_BULLETS ($SUM_MIN_BULLETS) is larger than SUM_MAX_BULLETS ($SUM_MAX_BULLETS)."
   fi
@@ -197,7 +203,7 @@ read_clipboard() {
   text=$(text_pl trim <"$JOB/clip") ||
     fail "Could not read the clipboard: $(cat "$JOB/pbpaste.err")"
   [ -n "$text" ] || fail "Nothing to summarize."
-  if host=$(text_pl url-host "$text"); then
+  if host=$(printf '%s' "$text" | text_pl url-host); then
     fetch_page "$text" "$host"
   else
     printf '%s' "$text" >"$JOB/input"

@@ -245,7 +245,7 @@ Requires Alfred 5.5 or later and a logged-in claude command (run claude once in 
 				<true/>
 			</dict>
 			<key>description</key>
-			<string>Fewest bullet points under the TL;DR.</string>
+			<string>Fewest bullet points under the TL;DR, from 1 to 100.</string>
 			<key>label</key>
 			<string>Fewest bullets</string>
 			<key>type</key>
@@ -266,7 +266,7 @@ Requires Alfred 5.5 or later and a logged-in claude command (run claude once in 
 				<true/>
 			</dict>
 			<key>description</key>
-			<string>Most bullet points under the TL;DR.</string>
+			<string>Most bullet points under the TL;DR, from 1 to 100.</string>
 			<key>label</key>
 			<string>Most bullets</string>
 			<key>type</key>
