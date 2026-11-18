@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    # The tests need macOS tools: BSD sed and ps, textutil, plutil, zipinfo,
+    # /bin/bash 3.2, /usr/bin/perl with JSON::PP, zsh and shasum.
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: command -v shellcheck || brew install shellcheck
+
+      - name: Lint shell scripts
+        run: shellcheck -x scripts/*.sh test/*.sh build.sh make_release.sh
+
+      - name: Lint info.plist
+        run: plutil -lint info.plist
+
+      # The runner may put Homebrew's bash 5 first on PATH, and the tests
+      # start the scripts with a bare `bash`. Alfred runs /bin/bash 3.2.
+      - name: Use /bin/bash 3.2
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          ln -sf /bin/bash "$RUNNER_TEMP/bin/bash"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
+      - name: Run tests
+        run: |
+          bash -c 'echo "bash $BASH_VERSION"'
+          for t in test/*.test.sh; do bash "$t" || exit 1; done

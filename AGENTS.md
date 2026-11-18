@@ -191,3 +191,6 @@ and a changed keyword.
   commit, push and `gh release create` commands. It never commits or
   publishes on its own, and it restores `info.plist` and removes the
   artifacts if any step fails.
+- `.github/workflows/ci.yml` runs the shellcheck, `plutil` and test
+  commands from this file on a macOS runner, for every push to `main` and
+  every pull request.
