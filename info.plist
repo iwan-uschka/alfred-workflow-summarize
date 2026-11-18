@@ -128,7 +128,7 @@ The summary streams into a Text View. Press ⌘C to copy it.
 
 Page text and mail bodies go to whatever the configured command talks to. With the default command, that is Anthropic's API through Claude Code.
 
-Requires Alfred 5.5 or later and a logged-in claude command (run claude once in a terminal).</string>
+Requires Alfred 5.5 or later and a logged-in claude command (run claude once in a terminal). The default command was tested with claude 2.1.326.</string>
 	<key>uidata</key>
 	<dict>
 		<key>A1D6C3E2-5B7F-4C1A-9E2D-3F4B5A6C7D81</key>
@@ -173,7 +173,7 @@ Requires Alfred 5.5 or later and a logged-in claude command (run claude once in 
 			<key>config</key>
 			<dict>
 				<key>default</key>
-				<string>claude -p --model "$SUM_MODEL" --tools "" --no-session-persistence --system-prompt "$SUM_PROMPT"</string>
+				<string>claude -p --model "$SUM_MODEL" --tools "" --strict-mcp-config --no-session-persistence --system-prompt "$SUM_PROMPT"</string>
 				<key>placeholder</key>
 				<string></string>
 				<key>required</key>
