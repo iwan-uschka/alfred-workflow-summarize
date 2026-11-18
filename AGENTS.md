@@ -26,8 +26,8 @@ sum [filter]  ->  Script Filter (rows.sh)  ->  Text View, script input (summariz
 - `scripts/rows.sh`: the Script Filter.
 - `scripts/summarize.sh`: the Text View script and the background job.
 - `scripts/text.pl`: text helpers in core Perl. Trimming, URL detection,
-  the clipboard preview, cutting to a length in characters, HTML stripping,
-  prompt filling, and all JSON output.
+  the clipboard preview, cutting to a length in characters, charset
+  decoding, HTML stripping, prompt filling, and all JSON output.
 - `scripts/timeout.pl`: `timeout(1)` for macOS. Exit 124 on timeout, kills
   the command's whole process group, passes a TERM on to that group.
 - `test/`: shell tests, see below. `test/fixtures/` holds small hand-written
@@ -110,11 +110,17 @@ same script-input Text View. Alfred does not document these numbers.
   not whole English sentences.
 - **HTML to text.** `textutil` alone waits up to 60 seconds for a real
   page's images and stylesheets and then fails. `text.pl strip-html` first
-  removes comments, `head`, `script`, `style`, `nav`, `aside`, `footer`,
-  forms and media, plus every tag that loads a resource. A page with exactly
-  one `<main>` keeps only that. Then `textutil` converts the rest, entities
-  and tables included. A fetched page with under 200 characters of text is
-  refused.
+  decodes the page with the first charset Perl's `Encode` knows: the one
+  in the Content-Type header, then those in the page's `<meta>` tags, then
+  UTF-8. A `<meta>` naming UTF-16 or UTF-32 means UTF-8, as in browsers.
+  Then it removes comments, `head`, `script`, `style`, `nav`, `aside`,
+  `footer`, form controls (`input`, `button`, `select`, `textarea`) and
+  media, plus every tag that loads a resource. `<form>` itself stays,
+  because some sites wrap the whole page in one. A page with exactly one
+  `<main>` keeps only that. Then `textutil` converts the UTF-8 result,
+  entities and tables included. Plain text is accepted only as
+  `text/plain` or `text/markdown`, decoded with the header's charset, else
+  UTF-8. A fetched page with under 200 characters of text is refused.
 - **Core tools only.** macOS ships everything the workflow runs: bash 3.2,
   `/usr/bin/perl` with core modules, `curl`, `textutil`, `osascript`.
 
