@@ -205,6 +205,35 @@ else
   ok
 fi
 
+# A TERM that arrives before timeout.pl has its handlers must still stop
+# the command. The window between fork and the handlers is too short to hit
+# on purpose, so the TERM is sent before timeout.pl even starts: blocked and
+# pending, it survives the exec and arrives once timeout.pl unblocks it.
+# The command inherits the blocked TERM, so the KILL after the grace period
+# is what ends it. Without the handler, Perl dies on the TERM and the
+# command outlives it.
+marker="3.$$"
+/usr/bin/perl -MPOSIX -e '
+  POSIX::sigprocmask(POSIX::SIG_BLOCK(), POSIX::SigSet->new(POSIX::SIGTERM()));
+  kill "TERM", $$;
+  exec @ARGV' /usr/bin/perl "$ROOT/scripts/timeout.pl" 30 /bin/sleep "$marker"
+# breaks-if: timeout.pl never unblocks TERM, or installs its handlers only after a TERM can arrive
+assert_eq "an early TERM to timeout.pl exits 143" "143" "$?"
+if pgrep -f "sleep $marker" >/dev/null; then
+  not_ok "an early TERM to timeout.pl should stop the command"
+  pkill -KILL -f "sleep $marker"
+else
+  ok
+fi
+
+# breaks-if: timeout.pl hands the command the TERM it blocked for itself
+# shellcheck disable=SC2016 # Perl code, not shell
+mask=$(TO 5 /usr/bin/perl -MPOSIX -e '
+  my $m = POSIX::SigSet->new;
+  POSIX::sigprocmask(POSIX::SIG_BLOCK(), POSIX::SigSet->new, $m);
+  print $m->ismember(POSIX::SIGTERM()) ? "blocked" : "open"')
+assert_eq "the command starts with TERM not blocked" "open" "$mask"
+
 start=$SECONDS
 TO 1 /bin/bash -c "trap '' TERM; sleep 30 & echo \$! >'$WORK/ignores-term'; wait"
 assert_eq "command that ignores TERM exits 124" "124" "$?"

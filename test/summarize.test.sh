@@ -567,6 +567,83 @@ fi
 refute_file "old job directory removed" "$old"
 assert_contains "new job still runs" "$out" "TL;DR: stub summary."
 
+# fake_job NAME BODY: a stand-in job in $JOBS/NAME, started like start_job
+# starts one, in a process group of its own. Its command line ends in
+# "summarize.sh --run DIR", so the script takes it for the job in DIR. BODY
+# is bash code and touches $FAKE_OUT/ready once its traps are set. Sets
+# fake_pid. Started from a subshell, so the fake is not a child of the test
+# shell: it never lingers as a zombie, and bash prints no notice when it
+# gets killed.
+export FAKE_OUT="$STUBS/fake"
+fake_job() {
+  rm -rf "$FAKE_OUT"
+  mkdir -p "$FAKE_OUT" "$JOBS/$1"
+  printf '%s\n' "$2" >"$FAKE_OUT/summarize.sh"
+  fake_pid=$(/usr/bin/perl -e 'setpgrp(0, 0); exec @ARGV' /bin/bash "$FAKE_OUT/summarize.sh" --run "$JOBS/$1" \
+    </dev/null >/dev/null 2>&1 & echo $!)
+  printf '%s\n' "$fake_pid" >"$JOBS/$1/pid"
+  for _ in $(seq 1 50); do [ -e "$FAKE_OUT/ready" ] && break; sleep 0.1; done
+}
+fake_alive() {
+  case "$(ps -ww -o command= -p "$fake_pid" 2>/dev/null)" in
+    *"summarize.sh --run"*) return 0 ;;
+  esac
+  return 1
+}
+
+# A stopped job still writes into its directory while it ends, the way
+# finish does. The directory goes only after that.
+reset_stubs
+clip "Text"
+fake_job job.slow 'trap '\''sleep 0.5; [ -d "$2" ] && echo yes >"$FAKE_OUT/saw-dir"; exit 143'\'' TERM
+: >"$FAKE_OUT/ready"
+while :; do sleep 0.1; done'
+summarize clipboard
+# breaks-if: stop_old_jobs removes the directory right after the TERM instead of waiting for the job to end
+assert_eq "a stopped job still had its directory while it ended" "yes" "$(cat "$FAKE_OUT/saw-dir" 2>/dev/null)"
+# breaks-if: stop_old_jobs skips the rm once it has waited for the job
+refute_file "the stopped job's directory removed afterwards" "$JOBS/job.slow"
+assert_contains "new job runs after waiting" "$out" "TL;DR: stub summary."
+
+# A job that ignores the TERM gets a KILL once the wait is over.
+reset_stubs
+clip "Text"
+fake_job job.deaf 'trap "" TERM
+: >"$FAKE_OUT/ready"
+while :; do sleep 0.1; done'
+start=$SECONDS
+summarize clipboard
+# breaks-if: stop_old_jobs drops the KILL for a job still running after the wait
+if fake_alive; then
+  not_ok "a job that ignores TERM should be killed"
+  kill -KILL -- "-$fake_pid" 2>/dev/null
+else
+  ok
+fi
+# breaks-if: stop_old_jobs waits without a bound for a job that ignores TERM
+assert_eq "the wait for a stopped job is bounded" "1" "$(( SECONDS - start < 15 ))"
+# breaks-if: stop_old_jobs keeps the directory of a job it had to KILL
+refute_file "the killed job's directory removed" "$JOBS/job.deaf"
+assert_contains "new job runs after a killed one" "$out" "TL;DR: stub summary."
+
+# A finished job's pid is never signalled, even if a process that looks
+# like that job holds it.
+reset_stubs
+clip "Text"
+fake_job job.done ': >"$FAKE_OUT/ready"
+while :; do sleep 0.1; done'
+: >"$JOBS/job.done/done"
+summarize clipboard
+# breaks-if: stop_old_jobs drops the `! -e done` guard and signals the pid of a finished job
+if fake_alive; then
+  ok
+else
+  not_ok "the pid of a finished job should not be signalled"
+fi
+kill -KILL -- "-$fake_pid" 2>/dev/null
+# breaks-if: stop_old_jobs keeps the directory of a finished job it did not signal
+refute_file "a finished job's directory removed" "$JOBS/job.done"
+
 # A stale job whose pid now belongs to another process group: that group
 # survives, and the stale directory still goes.
 reset_stubs
@@ -586,6 +663,78 @@ fi
 wait "$other_pid" 2>/dev/null
 refute_file "stale job directory removed" "$JOBS/job.stale"
 assert_contains "new job runs after a stale one" "$out" "TL;DR: stub summary."
+
+# render_until_final JOB: reruns the Text View for JOB like Alfred, at most
+# 50 times. Sets out (last response) and head ("rerun|sum_job").
+render_until_final() {
+  local json fields
+  for _ in $(seq 1 50); do
+    json=$(sum_job="$1" bash "$SCRIPT" clipboard 2>/dev/null)
+    fields=$(printf '%s' "$json" | render_fields)
+    head=${fields%%$'\n'*}
+    [ "${head%%|*}" = "-" ] && break
+    sleep 0.1
+  done
+  out=${fields#*$'\n'}
+}
+
+# A job killed before it could write done ends the view with a message.
+reset_stubs
+clip "Text"
+export STUB_CMD_MODE=hang
+job=$(sum_job="" bash "$SCRIPT" clipboard | json_get '$d->{variables}{sum_job}')
+for _ in $(seq 1 50); do [ -s "$STUBS/cmd.pid" ] && break; sleep 0.1; done
+unset STUB_CMD_MODE
+echo "last words of the job" >>"$job/job.err"
+kill -KILL -- "-$(cat "$job/pid")" 2>/dev/null
+cmd_pid=$(cat "$STUBS/cmd.pid" 2>/dev/null)
+kill -KILL -- "-$cmd_pid" 2>/dev/null || kill -KILL "$cmd_pid" 2>/dev/null
+render_until_final "$job"
+# breaks-if: render only looks for done and reruns forever for a job that died without it
+assert_eq "a killed job stops the reruns" "-|" "$head"
+assert_contains "a killed job ends with a message" "$out" "Summarize stopped unexpectedly."
+assert_contains "the message carries the job's stderr" "$out" "last words of the job"
+refute_file "a killed job's directory removed" "$job"
+
+# A job whose pid now runs something else is dead too, and that process
+# is left alone.
+reset_stubs
+mkdir -p "$JOBS/job.reused"
+echo "reused stderr" >"$JOBS/job.reused/job.err"
+/usr/bin/perl -e 'setpgrp(0, 0); exec @ARGV' sleep 30 &
+other_pid=$!
+printf '%s\n' "$other_pid" >"$JOBS/job.reused/pid"
+render_until_final "$JOBS/job.reused"
+# breaks-if: render takes any live pid for the running job
+assert_eq "a job whose pid runs something else is not rerun" "-|" "$head"
+assert_contains "a job whose pid was reused ends with a message" "$out" "Summarize stopped unexpectedly."
+assert_contains "the reused-pid message carries the job's stderr" "$out" "reused stderr"
+# breaks-if: render signals the process that now holds a dead job's pid
+if kill -0 "$other_pid" 2>/dev/null; then ok; else not_ok "render should not signal the process that now holds the pid"; fi
+kill "$other_pid" 2>/dev/null
+wait "$other_pid" 2>/dev/null
+refute_file "a reused-pid job's directory removed" "$JOBS/job.reused"
+
+# A job directory without a pid, left by a start that failed before it
+# wrote one, counts as dead too.
+reset_stubs
+mkdir -p "$JOBS/job.nopid"
+echo "no pid stderr" >"$JOBS/job.nopid/job.err"
+render_until_final "$JOBS/job.nopid"
+# breaks-if: job_running treats a missing or empty pid as a running job
+assert_eq "a job without a pid file is not rerun" "-|" "$head"
+assert_contains "a job without a pid file ends with a message" "$out" "Summarize stopped unexpectedly."
+refute_file "a pid-less job's directory removed" "$JOBS/job.nopid"
+
+# A dead job that already wrote its own message keeps it.
+reset_stubs
+mkdir -p "$JOBS/job.hasmsg"
+echo "A real failure message." >"$JOBS/job.hasmsg/msg"
+echo "ignored stderr" >"$JOBS/job.hasmsg/job.err"
+render_until_final "$JOBS/job.hasmsg"
+# breaks-if: render writes "stopped unexpectedly" over the message of a job that died before done
+assert_eq "a dead job's own message is kept" "A real failure message." "$out"
+refute_file "a dead job with a message leaves no directory" "$JOBS/job.hasmsg"
 
 # ===================================================== prompt assembly
 
@@ -709,6 +858,29 @@ SCRIPT="$STUBS/staged/scripts/summarize.sh" summarize window
 assert_contains "a crashed job still ends with a message" "$out" "Summarize stopped unexpectedly (exit code 1)."
 assert_contains "the message carries the job's stderr" "$out" "UNDEFINED_FOR_THIS_TEST: unbound variable"
 assert_eq "a crashed job leaves no directory" "0" "$(jobs_left)"
+
+reset_stubs
+stage_scripts
+sed -i '' 's|^    /bin/bash "$LIB_DIR/summarize.sh" --run|    /nonexistent/bash "$LIB_DIR/summarize.sh" --run|' "$STUBS/staged/scripts/summarize.sh"
+clip "Text"
+SCRIPT="$STUBS/staged/scripts/summarize.sh" summarize clipboard
+# breaks-if: render keeps rerunning a job whose launcher died before it started
+assert_contains "a job that never started ends with a message" "$out" "Summarize stopped unexpectedly."
+assert_contains "the message carries the launcher's error" "$out" "cannot run /nonexistent/bash"
+assert_eq "a job that never started sends nothing" "no" "$(cmd_ran)"
+assert_eq "a job that never started leaves no directory" "0" "$(jobs_left)"
+
+reset_stubs
+stage_scripts
+sed -i '' 's/^  "\$PERL" -e /  sleep 1 \&\& exec "$PERL" -e /' "$STUBS/staged/scripts/summarize.sh"
+clip "Text"
+first=$(sum_job="" bash "$STUBS/staged/scripts/summarize.sh" clipboard 2>/dev/null)
+# breaks-if: the first run takes a job whose launcher has not started yet for dead
+assert_eq "a slow launcher still gets a rerun" "0.3" "$(printf '%s' "$first" | json_get '$d->{rerun}')"
+job=$(printf '%s' "$first" | json_get '$d->{variables}{sum_job}')
+for _ in $(seq 1 50); do [ -e "$job/done" ] && break; sleep 0.1; done
+assert_file "the slow launcher's job still ran" "$job/done"
+rm -rf "$job"
 
 reset_stubs
 stage_scripts

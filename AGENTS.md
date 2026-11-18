@@ -51,9 +51,18 @@ the same way.
    plus the command's stdout so far, or a status line before there is any.
 3. Once the job wrote `done`: render the final text without `rerun`, set
    `sum_job` to empty, and delete the job directory.
+4. A job that ended without `done`, because it got a KILL or the launcher
+   could not start it, ends the same way, with "Summarize stopped
+   unexpectedly." and the last lines of `job.err`. A job counts as running
+   only while its pid still runs `summarize.sh --run <job>`. A KILL from
+   outside also kills the job's `timeout.pl`, so a backend running at that
+   moment keeps running, and nothing stops it.
 
 Starting a job stops every older job first (`stop_old_jobs`), so closing the
-Text View mid-run and starting again never leaves a backend running.
+Text View mid-run and starting again never leaves a backend running. It
+sends a TERM to the old job's process group, waits up to 5 seconds for the
+job to end, then sends a KILL if it is still running, and only then deletes
+the directory. The job's EXIT trap writes into that directory while it ends.
 
 The Text View's `behaviour`, `outputmode` and `scriptinput` values in
 `info.plist` are copied from Alfred's own ChatGPT workflow, which uses the
