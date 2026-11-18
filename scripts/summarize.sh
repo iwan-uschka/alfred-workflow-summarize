@@ -204,15 +204,15 @@ read_clipboard() {
   fi
 }
 
-# html_to_text [CHARSET]: HTML on stdin, plain text on stdout. Perl removes
-# scripts, styles, navigation and every tag that loads a resource, then the
-# built-in textutil does the actual conversion, entities and tables
+# html_to_text [CHARSET]: HTML on stdin, plain text on stdout. Perl decodes
+# the page with CHARSET, else the page's <meta> charset, else UTF-8, and
+# removes scripts, styles, navigation and every tag that loads a resource.
+# Then the built-in textutil does the actual conversion, entities and tables
 # included. textutil alone waits up to a minute for a page's resources.
 html_to_text() {
-  local charset="${1:-}"
-  text_pl strip-html |
+  text_pl strip-html "${1:-}" |
     tool_run SUM_TEXTUTIL textutil "${SUM_FETCH_TIMEOUT:-15}" -convert txt -format html \
-      ${charset:+-inputencoding "$charset"} -stdin -stdout 2>/dev/null |
+      -inputencoding UTF-8 -stdin -stdout 2>/dev/null |
     text_pl clean-text
 }
 
@@ -237,9 +237,9 @@ fetch_page() {
     2??) ;;
     *) fail "$host answered with HTTP $code. $HINT_ACTIVE_WINDOW" ;;
   esac
+  charset=$(printf '%s\n' "$ctype" | sed -n 's/.*charset="\{0,1\}\([A-Za-z0-9_-]*\).*/\1/p')
   case "$ctype" in
     '' | text/html* | application/xhtml*)
-      charset=$(printf '%s\n' "$ctype" | sed -n 's/.*charset="\{0,1\}\([A-Za-z0-9_-]*\).*/\1/p')
       text=$(html_to_text "$charset" <"$JOB/page")
       rc=$?
       # Without this, a failed conversion reads as a page with no text.
@@ -249,7 +249,8 @@ fetch_page() {
         fail "Could not convert the page at $host to text. $HINT_ACTIVE_WINDOW"
       fi
       ;;
-    text/*) text=$(text_pl clean-text <"$JOB/page") ;;
+    text/plain | text/plain[\;\ ]* | text/markdown | text/markdown[\;\ ]*)
+      text=$(text_pl decode "$charset" <"$JOB/page" | text_pl clean-text) ;;
     *) fail "$host sent ${ctype%%;*}, not a web page. $HINT_ACTIVE_WINDOW" ;;
   esac
   chars=$(printf '%s' "$text" | text_pl count)

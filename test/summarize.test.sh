@@ -133,6 +133,46 @@ summarize clipboard
 assert_contains "charset from Content-Type decodes the page" "$(cat "$STUBS/cmd.stdin")" "Café crème."
 
 reset_stubs
+printf 'Caf\xe9 cr\xe8me. %s\n' "$(printf 'Latin-1 page text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
+export STUB_CTYPE='text/html; charset="ISO-8859-1"'
+clip "https://example.com/latin1-quoted"
+summarize clipboard
+# breaks-if: the Content-Type parser stops accepting a quoted charset value
+assert_contains "quoted charset from Content-Type decodes the page" "$(cat "$STUBS/cmd.stdin")" "Café crème."
+
+reset_stubs
+cp "$FIXTURES/meta-latin1.html" "$STUB_PAGE"
+export STUB_CTYPE="text/html"
+clip "https://example.com/meta-only"
+summarize clipboard
+# breaks-if: strip-html removes <meta> before the page's own charset is read
+assert_contains "charset from <meta> alone decodes the page" "$(cat "$STUBS/cmd.stdin")" "Café crème in Latin-1."
+
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+export STUB_CTYPE="application/xhtml+xml; charset=utf-8"
+clip "https://example.com/xhtml"
+summarize clipboard
+# breaks-if: application/xhtml+xml is no longer treated as HTML
+assert_contains "XHTML page is converted" "$(cat "$STUBS/cmd.stdin")" "Volunteers counted"
+refute_contains "XHTML page drops its scripts" "$(cat "$STUBS/cmd.stdin")" "TRACKER_SCRIPT_TEXT"
+
+reset_stubs
+printf 'Caf\xe9 cr\xe8me. %s\n' "$(printf 'Latin-1 plain text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
+export STUB_CTYPE="text/plain; charset=iso-8859-1"
+clip "https://example.com/latin1.txt"
+summarize clipboard
+# breaks-if: plain text ignores the Content-Type charset and is read as UTF-8
+assert_contains "charset from Content-Type decodes plain text" "$(cat "$STUBS/cmd.stdin")" "Café crème."
+
+reset_stubs
+printf '# Notes\n\nGrüße. %s\n' "$(printf 'Markdown text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
+export STUB_CTYPE="text/markdown"
+clip "https://example.com/notes.md"
+summarize clipboard
+assert_contains "Markdown without a charset is read as UTF-8" "$(cat "$STUBS/cmd.stdin")" "# Notes"$'\n\n'"Grüße."
+
+reset_stubs
 cp "$FIXTURES/article.html" "$STUB_PAGE"
 export STUB_CTYPE=""
 clip "https://example.com/no-type"
@@ -214,6 +254,17 @@ clip "https://example.com/file.pdf"
 summarize clipboard
 # breaks-if: non-text responses are run through the HTML converter
 assert_eq "non-text response message" "example.com sent application/pdf, not a web page. $HINT" "$out"
+
+for ctype in "text/css" "text/javascript; charset=utf-8" "text/plainfoo" "text/markdownfoo"; do
+  reset_stubs
+  printf '%s' "$(printf 'body { color: red; } %.0s' $(seq 1 20))" >"$STUB_PAGE"
+  export STUB_CTYPE="$ctype"
+  clip "https://example.com/asset"
+  summarize clipboard
+  # breaks-if: every text/* type is summarized, not only text/plain and text/markdown
+  assert_eq "$ctype response message" "example.com sent ${ctype%%;*}, not a web page. $HINT" "$out"
+  assert_eq "$ctype response sends nothing" "no" "$(cmd_ran)"
+done
 
 reset_stubs
 cp "$FIXTURES/article.html" "$STUB_PAGE"
