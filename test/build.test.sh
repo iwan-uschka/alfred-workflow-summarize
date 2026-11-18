@@ -50,6 +50,11 @@ mkdir -p "$dir/unpacked"
 (cd "$dir/unpacked" && unzip -q "../$OUT")
 plutil -lint "$dir/unpacked/info.plist" >/dev/null
 assert_eq "unpacked info.plist lints" "0" "$?"
+# breaks-if: createdby or webaddress in info.plist is emptied or points elsewhere
+assert_eq "unpacked info.plist names the author" "iwan-uschka" \
+  "$(plutil -extract createdby raw -o - "$dir/unpacked/info.plist")"
+assert_eq "unpacked info.plist links the repo" "https://github.com/iwan-uschka/alfred-workflow-summarize" \
+  "$(plutil -extract webaddress raw -o - "$dir/unpacked/info.plist")"
 assert_eq "unpacked Script Filter rows run" "Active window|Clipboard" \
   "$(cd "$dir/unpacked" && SUM_PBPASTE=true SUM_LSAPPINFO=true /bin/bash ./scripts/rows.sh "" |
     /usr/bin/perl -MJSON::PP -e 'local $/; print join "|", map { $_->{title} } @{decode_json(<STDIN>)->{items}}')"
