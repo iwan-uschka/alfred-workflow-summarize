@@ -113,6 +113,13 @@ same script-input Text View. Alfred does not document these numbers.
 - **Failures are messages.** The job never exits with an empty Text View.
   `fail` writes one line to `msg`, and the EXIT trap writes a message with
   the job's last stderr lines when the job dies on its own.
+- **The read text leaves the disk early.** `run_command` opens `input` as
+  the command's stdin and then deletes it with the other files that hold
+  the read text (`drop_content`). `finish` runs `drop_content` again, so a
+  job that fails before the command keeps nothing either, and it also
+  deletes `err` and `status`. A job that ends after its view was closed
+  leaves only the files the final render reads. A job killed before
+  `finish` runs keeps what it had, `err` included, until the next start.
 - **Error detection survives translation.** macOS and the browsers translate
   AppleScript errors. `apple_error` matches the error number `-1743` and
   the words `JavaScript` plus `Apple Event`, `Apple-Event` or `AppleScript`,
@@ -158,7 +165,8 @@ for t in test/*.test.sh; do bash "$t" || exit 1; done
 - `test/summarize.test.sh`: the Text View flow. Each case runs the rerun
   loop like Alfred until the output has no `rerun`. Covers every source,
   every failure message, the size limit, the timeouts, prompt assembly,
-  config guards, isolation of the command, stopping old jobs, and that the
+  config guards, isolation of the command, stopping old jobs, that the read
+  text leaves the job directory on every way a job ends, and that the
   plist's defaults match the script's.
 - `test/text.test.sh`: `text.pl`, `timeout.pl` and `html_to_text` against
   the fixtures.

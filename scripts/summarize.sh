@@ -7,22 +7,37 @@
 #
 # Alfred 5.5 streams into a Text View by rerunning its script: each run
 # prints the text so far plus a `rerun` interval, and a `sum_job` variable
-# that Alfred hands back on the next run. So the first run starts the real
-# work as a detached background job and returns at once. Every rerun only
+# that Alfred hands back on the next run. So the first run stops any older
+# job, which can take up to 5 s, then starts the real work as a detached
+# background job and returns without waiting for it. Every rerun only
 # renders the job's files. The last render drops `rerun`, which stops the
 # loop, and deletes the job directory.
 #
 # A job directory holds:
-#   source   window or clipboard
-#   pid      the job's process id, which is also its process group id
-#   status   one line for the view while there is no output yet
-#   input    the text sent to the command
-#   notice   a note shown above the summary (input was cut)
-#   out      the command's stdout, growing while it runs
-#   err      the command's stderr
-#   job.err  the job's own stderr, shown only if the job dies unexpectedly
-#   msg      the failure message, if any
-#   done     exists once the job has finished
+#   source       window or clipboard
+#   pid          the job's process id, which is also its process group id
+#   status       one line for the view while there is no output yet, which
+#                can name the fetched host
+#   clip         the clipboard as pbpaste printed it
+#   pbpaste.err  pbpaste's stderr
+#   page         the downloaded page, when the clipboard holds a URL
+#   curl.err     curl's stderr
+#   osa.err      osascript's stderr
+#   input        the text sent to the command
+#   input.cut    input cut to SUM_MAX_CHARS, renamed to input right away
+#   notice       a note shown above the summary (input was cut)
+#   out          the command's stdout, growing while it runs
+#   err          the command's stderr
+#   job.err      the job's own stderr, shown only if the job dies unexpectedly
+#   msg          the failure message, if any
+#   done         exists once the job has finished
+#
+# drop_content deletes clip, pbpaste.err, page, curl.err, osa.err, input
+# and input.cut once the command has its input open. finish deletes them
+# again, plus err and status, when the job ends. So a job that ends after
+# its Text View was closed leaves only the files the final render reads
+# until the next start. A job killed before finish runs keeps what it had
+# at that moment, err included, until the next start.
 #
 # Must stay compatible with /bin/bash 3.2 (what Alfred runs).
 set -uo pipefail
@@ -156,6 +171,13 @@ view() {
 JOB=""
 CMD_DIR=""
 
+# drop_content: deletes the files that hold the text the job read, or
+# error output from reading it. Missing files are fine, so it can run twice.
+drop_content() {
+  rm -f "$JOB/clip" "$JOB/pbpaste.err" "$JOB/page" "$JOB/curl.err" "$JOB/osa.err" \
+    "$JOB/input" "$JOB/input.cut"
+}
+
 # Runs on every exit of the job. A job that dies without saying why, for
 # example on a bug that trips `set -u`, still ends with a message and the
 # last lines of its own stderr, so the Text View never stays empty.
@@ -169,7 +191,11 @@ finish() {
       tail -n 3 "$JOB/job.err" 2>/dev/null
     } >"$JOB/msg"
   fi
+  drop_content
+  rm -f "$JOB/err"
   : >"$JOB/done"
+  # Only after done: a running view shows status while out is empty.
+  rm -f "$JOB/status"
 }
 
 # fail MESSAGE: the job ends with MESSAGE as its only output line.
@@ -448,8 +474,13 @@ run_command() {
   # An empty directory as the working directory, so a backend that looks
   # around (Claude Code reads CLAUDE.md files) finds nothing to read.
   CMD_DIR=$(mktemp -d)
-  (cd "$CMD_DIR" && exec "$PERL" "$LIB_DIR/timeout.pl" "$SUM_TIMEOUT" /bin/zsh -c "$SUM_COMMAND") \
-    <"$JOB/input" >"$JOB/out" 2>"$JOB/err"
+  # The command reads input through the open stdin, so the file can go
+  # before the command starts.
+  {
+    drop_content
+    (cd "$CMD_DIR" && exec "$PERL" "$LIB_DIR/timeout.pl" "$SUM_TIMEOUT" /bin/zsh -c "$SUM_COMMAND") \
+      >"$JOB/out" 2>"$JOB/err"
+  } <"$JOB/input"
   rc=$?
   if [ "$rc" -eq 124 ]; then
     fail "The command timed out after $SUM_TIMEOUT s (SUM_TIMEOUT)."
