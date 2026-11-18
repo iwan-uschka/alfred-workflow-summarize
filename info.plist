@@ -23,7 +23,7 @@
 		</array>
 	</dict>
 	<key>createdby</key>
-	<string></string>
+	<string>iwan-uschka</string>
 	<key>description</key>
 	<string>Summarize the active window or the clipboard into a TL;DR and bullets.</string>
 	<key>disabled</key>
@@ -312,6 +312,6 @@ Requires Alfred 5.5 or later and a logged-in claude command (run claude once in 
 	<key>version</key>
 	<string>0.1.0</string>
 	<key>webaddress</key>
-	<string></string>
+	<string>https://github.com/iwan-uschka/alfred-workflow-summarize</string>
 </dict>
 </plist>
