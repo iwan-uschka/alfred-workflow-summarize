@@ -159,13 +159,19 @@ for t in test/*.test.sh; do bash "$t" || exit 1; done
   guards in temp copies and throwaway git repos. They never write to this
   repo's `dist/` and never reach the network.
 
-Stubs live in `test/stubs.sh`. The variables `SUM_PBPASTE`, `SUM_LSAPPINFO`,
-`SUM_OSASCRIPT` and `SUM_CURL` replace those tools with a command line split
+Stubs live in `test/stubs.sh`. It first unsets every `SUM_*` and `sum_*`
+variable the caller's shell exports, so the tests start from the workflow's
+defaults. The variables `SUM_PBPASTE`, `SUM_LSAPPINFO`, `SUM_OSASCRIPT`,
+`SUM_CURL` and `SUM_TEXTUTIL` replace those tools with a command line split
 on spaces, so the stubs run as `/bin/bash <file>` and need no execute bit.
-`textutil` and `perl` run for real in the flow tests. `SUM_COMMAND` points at a stub backend that logs its stdin,
-working directory, prompt and model. No test can reach the real `claude`:
-the cases that need a command starting with `claude` point `ZDOTDIR` at a
-`.zshenv` defining a `claude` function, which zsh runs before searching PATH.
+`stubs.sh` sets the first four. `textutil` and `perl` run for real in the
+flow tests, except in the two conversion-failure cases, which set
+`SUM_TEXTUTIL` themselves. `SUM_COMMAND` points at a stub backend that logs
+its stdin, working directory, prompt and model. No test can reach the real
+`claude`: the cases that need a command starting with `claude` point
+`ZDOTDIR` at a `.zshenv` defining a `claude` function, which zsh runs before
+searching PATH. They also point `HOME` at an empty directory, so no
+`claude` under `~/.local/bin` or another directory in HOME lands on PATH.
 
 Each failure-path test has a `# breaks-if:` comment naming the change that
 would turn it red. Failures here are rendered messages with exit code 0, so

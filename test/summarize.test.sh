@@ -4,12 +4,18 @@
 # the script the way Alfred does: once with the row's argument, then again
 # with the `sum_job` variable from the previous output for as long as that
 # output asks for a rerun. The backend, pbpaste, lsappinfo, osascript and
-# curl are stubs (see test/stubs.sh); textutil and perl are the real ones.
+# curl are stubs (see test/stubs.sh); textutil and perl are the real ones,
+# except in the two conversion-failure cases, which stub textutil through
+# SUM_TEXTUTIL.
 #
 # No case can reach the real `claude`. SUM_COMMAND always names the stub,
 # and the cases that need a command whose first word is `claude` point
 # ZDOTDIR at a .zshenv that defines `claude` as a shell function calling the
-# stub. zsh runs a function before it looks at PATH.
+# stub. zsh runs a function before it looks at PATH. Those cases also point
+# HOME at an empty directory, so setup_env adds no ~/.local/bin or other
+# directory under HOME to PATH. /opt/homebrew/bin and /usr/local/bin still
+# come first on PATH, so the function is what keeps a `claude` installed
+# there from running.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -115,6 +121,7 @@ assert_eq "multi-line text is sent as is" $'https://example.com/x\nNotes about t
 reset_stubs
 clip "example.com/page"
 summarize clipboard
+# breaks-if: the URL check stops requiring an http or https scheme
 refute_contains "bare domain is not fetched" "$calls" "curl"
 assert_eq "bare domain is sent as text" "example.com/page" "$(cat "$STUBS/cmd.stdin")"
 
@@ -169,6 +176,8 @@ summarize clipboard
 unset SUM_APP_TIMEOUT
 # breaks-if: the pbpaste watchdog or its timeout message is removed
 assert_eq "hanging pbpaste message" "The clipboard did not answer within 1 s (SUM_APP_TIMEOUT)." "$out"
+# breaks-if: the running view stops falling back to the status line while there is no output
+assert_contains "hanging pbpaste shows the reading status while it runs" "$running" "Reading…"
 assert_eq "hanging pbpaste stops near the limit" "1" "$(( SECONDS - start < 10 ))"
 assert_eq "hanging pbpaste sends nothing" "no" "$(cmd_ran)"
 
@@ -195,6 +204,8 @@ summarize clipboard
 unset SUM_FETCH_TIMEOUT
 # breaks-if: the watchdog around curl is removed and a hanging fetch blocks forever
 assert_eq "hanging fetch message" "Fetching hang.example timed out after 1 s (SUM_FETCH_TIMEOUT). $HINT" "$out"
+# breaks-if: fetch_page stops setting the "Fetching <host>…" status
+assert_contains "hanging fetch shows the host while it runs" "$running" "Fetching hang.example…"
 assert_eq "hanging fetch stops near the limit" "1" "$(( SECONDS - start < 10 ))"
 assert_eq "hanging fetch sends nothing" "no" "$(cmd_ran)"
 
@@ -360,6 +371,12 @@ for pair in "org.mozilla.firefox|Firefox" "com.apple.Notes|Notes" "com.apple.Saf
 done
 
 reset_stubs
+window_app com.example.Unnamed ""
+summarize window
+# breaks-if: read_window stops naming the app by its bundle id when it has no name
+assert_eq "app without a name is named by its bundle id" "Not supported in com.example.Unnamed." "$out"
+
+reset_stubs
 window_app "" ""
 front "" ""
 summarize window
@@ -396,6 +413,13 @@ summarize window
 assert_eq "Brave JavaScript off, German message" "Brave Browser does not allow JavaScript from Apple Events. Turn on View > Developer > Allow JavaScript from Apple Events." "$out"
 
 reset_stubs
+window_app com.google.Chrome "Google Chrome"
+export STUB_OSA_ERR="Ausführungsfehler: JavaScript über Apple-Events ist deaktiviert. (12)"
+summarize window
+# breaks-if: apple_error stops matching the hyphenated "Apple-Event" spelling
+assert_eq "Chrome JavaScript off, hyphenated Apple-Events" "Google Chrome does not allow JavaScript from Apple Events. Turn on View > Developer > Allow JavaScript from Apple Events." "$out"
+
+reset_stubs
 window_app com.apple.Safari Safari
 export STUB_OSA_ERR="execution error: Safari got an error: You must enable the 'Allow JavaScript from Apple Events' option in Safari's Develop menu to use 'do JavaScript'. (8)"
 summarize window
@@ -425,6 +449,8 @@ summarize window
 unset SUM_APP_TIMEOUT
 # breaks-if: the watchdog around osascript is removed
 assert_eq "hanging app" "Safari did not answer within 1 s (SUM_APP_TIMEOUT)." "$out"
+# breaks-if: read_browser stops setting the "Reading <app>…" status
+assert_contains "hanging app shows the app while it runs" "$running" "Reading Safari…"
 assert_eq "hanging app stops near the limit" "1" "$(( SECONDS - start < 10 ))"
 
 # ===================================================== size limit
@@ -445,6 +471,14 @@ assert_contains "the cut is stated" "$out" "Input cut to 50 characters (SUM_MAX_
 assert_contains "the summary follows the notice" "$out" "TL;DR: stub summary."
 unset SUM_MAX_CHARS
 
+reset_stubs
+clip "Longer text"
+export STUB_CMD_MODE=hang SUM_TIMEOUT=1 SUM_MAX_CHARS=4
+summarize clipboard
+unset SUM_TIMEOUT SUM_MAX_CHARS
+# breaks-if: the running view stops showing the cut notice
+assert_contains "the cut is stated while the command runs" "$running" $'Input cut to 4 characters (SUM_MAX_CHARS).\n\nSummarizing…'
+
 # ===================================================== the command
 
 reset_stubs
@@ -455,30 +489,47 @@ summarize clipboard
 assert_eq "command failure" $'The command failed with exit code 3.\nstub: not logged in' "$out"
 refute_contains "no login hint for another command" "$out" "Run \`claude\`"
 
+# The command's stderr in the message stops at 2000 characters.
+printf 'printf "%%s" "$STUB_ERR" >&2\nexit 3\n' >"$STUBS/errout"
+e2000=$(printf 'e%.0s' $(seq 1 2000))
+reset_stubs
+clip "Text"
+STUB_ERR="$e2000" SUM_COMMAND="/bin/bash $STUBS/errout" summarize clipboard
+# breaks-if: the cut on the command's stderr drops below 2000 characters
+assert_eq "2000 characters of stderr are shown whole" $'The command failed with exit code 3.\n'"$e2000" "$out"
+reset_stubs
+clip "Text"
+STUB_ERR="${e2000}X" SUM_COMMAND="/bin/bash $STUBS/errout" summarize clipboard
+# breaks-if: the cut on the command's stderr is removed or goes off by one
+assert_eq "2001 characters of stderr are cut to 2000" $'The command failed with exit code 3.\n'"$e2000" "$out"
+
 ZDIR="$STUBS/zdotdir"
-mkdir -p "$ZDIR"
+ZHOME="$STUBS/zhome"
+mkdir -p "$ZDIR" "$ZHOME"
 printf 'claude() { /bin/bash "%s/cmd" "$@"; }\n' "$STUBS" >"$ZDIR/.zshenv"
 reset_stubs
 clip "Text"
 export STUB_CMD_MODE=fail
-ZDOTDIR="$ZDIR" SUM_COMMAND='claude -p --model "$SUM_MODEL"' summarize clipboard
+HOME="$ZHOME" ZDOTDIR="$ZDIR" SUM_COMMAND='claude -p --model "$SUM_MODEL"' summarize clipboard
 # breaks-if: the login hint is dropped, or keyed to something other than the first word
 assert_eq "claude failure adds the login hint" $'The command failed with exit code 3.\nstub: not logged in\nRun `claude` once in a terminal to log in.' "$out"
 
 reset_stubs
 clip "Text"
-ZDOTDIR="$ZDIR" SUM_COMMAND='claude -p' summarize clipboard
+HOME="$ZHOME" ZDOTDIR="$ZDIR" SUM_COMMAND='claude -p' summarize clipboard
 assert_contains "claude as first word reaches the stub (zsh function)" "$out" "TL;DR: stub summary."
 
 # shellcheck source=scripts/summarize.sh
 ( source "$SCRIPT"
+  # breaks-if: command_name stops removing the quotes around the first word
   for pair in "claude -p|claude" "/opt/homebrew/bin/claude -p|claude" "  claude|claude" \
+      '"/opt/x/claude" -p|claude' '"claude" -p|claude' \
       "claude-wrapper -p|claude-wrapper" "llm -m x|llm" "echo claude|echo"; do
     SUM_COMMAND="${pair%%|*}"
     [ "$(command_name)" = "${pair#*|}" ] && echo ok || echo "FAIL: command_name [$SUM_COMMAND] gave [$(command_name)]"
   done ) >"$STUBS/names"
 assert_eq "command_name picks the first word without its directory" "0" "$(grep -c FAIL "$STUBS/names")"
-assert_eq "command_name cases all ran and passed" "6" "$(grep -c '^ok$' "$STUBS/names")"
+assert_eq "command_name cases all ran and passed" "8" "$(grep -c '^ok$' "$STUBS/names")"
 
 reset_stubs
 clip "Text"
@@ -488,6 +539,8 @@ summarize clipboard
 unset SUM_TIMEOUT
 # breaks-if: the watchdog around the command is removed
 assert_eq "command timeout" "The command timed out after 1 s (SUM_TIMEOUT)." "$out"
+# breaks-if: run_command stops setting the "Summarizing…" status
+assert_contains "a silent command shows the summarizing status" "$running" "Summarizing…"
 assert_eq "command timeout stops near the limit" "1" "$(( SECONDS - start < 10 ))"
 sleep 0.2
 pid=$(cat "$STUBS/cmd.pid" 2>/dev/null)
@@ -589,6 +642,12 @@ assert_contains "new job runs after a stale one" "$out" "TL;DR: stub summary."
 
 # ===================================================== prompt assembly
 
+# A setting the developer's shell exports must not reach the tests.
+leaked=$(SUM_MODEL=opus sum_app_id=com.apple.Notes /bin/bash -c \
+  'source "$1/test/stubs.sh"; printf "%s|%s|%s" "${SUM_MODEL-unset}" "${sum_app_id-unset}" "${SUM_CURL:+stubbed}"' _ "$ROOT")
+# breaks-if: stubs.sh stops unsetting SUM_* and sum_* from the caller's environment
+assert_eq "stubs.sh drops exported SUM_* and sum_* but keeps its stubs" "unset|unset|stubbed" "$leaked"
+
 reset_stubs
 clip "Text"
 summarize clipboard
@@ -658,7 +717,7 @@ reset_stubs
 clip "Text"
 saved_command=$SUM_COMMAND
 unset SUM_COMMAND
-ZDOTDIR="$ZDIR" summarize clipboard
+HOME="$ZHOME" ZDOTDIR="$ZDIR" summarize clipboard
 export SUM_COMMAND=$saved_command
 # breaks-if: an unset SUM_COMMAND no longer falls back to the default command
 assert_contains "unset command runs the default (claude through the stub)" "$out" "TL;DR: stub summary."
