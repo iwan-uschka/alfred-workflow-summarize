@@ -125,6 +125,27 @@ summarize clipboard
 refute_contains "lone http:// is not fetched" "$calls" "curl"
 assert_eq "lone http:// is sent as text" "http://" "$(cat "$STUBS/cmd.stdin")"
 
+pad=$(printf 'a%.0s' $(seq 1 2028))
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/$pad"
+summarize clipboard
+assert_contains "a 2048-character URL is fetched" "$calls" "https://example.com/$pad"
+reset_stubs
+clip "https://example.com/${pad}a"
+summarize clipboard
+# breaks-if: read_clipboard calls a URL check other than url-host, with its own or no length limit
+refute_contains "a 2049-character URL is not fetched" "$calls" "curl"
+assert_eq "a 2049-character URL is sent as text" "https://example.com/${pad}a" "$(cat "$STUBS/cmd.stdin")"
+reset_stubs
+long="https://example.com/$(/usr/bin/perl -e 'print "a" x 300000')"
+clip "$long"
+summarize clipboard
+# breaks-if: url_host loses its length limit and the job fetches a 300 KB link
+refute_contains "a 300 KB URL is not fetched" "$calls" "curl"
+assert_eq "a 300 KB URL reaches the command as text" "${long:0:200000}" "$(cat "$STUBS/cmd.stdin")"
+assert_contains "a 300 KB URL is summarized" "$out" "TL;DR: stub summary."
+
 reset_stubs
 printf 'Caf\xe9 cr\xe8me. %s\n' "$(printf 'Latin-1 page text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
 export STUB_CTYPE="text/html; charset=ISO-8859-1"
@@ -620,16 +641,57 @@ for pair in "SUM_MIN_BULLETS=abc|SUM_MIN_BULLETS must be a whole number of 1 or 
     "SUM_MAX_CHARS=-5|SUM_MAX_CHARS must be a whole number of 1 or more (got \"-5\")." \
     "SUM_TIMEOUT=1.5|SUM_TIMEOUT must be a whole number of 1 or more (got \"1.5\")." \
     "SUM_FETCH_TIMEOUT=007|SUM_FETCH_TIMEOUT must be a whole number of 1 or more (got \"007\")." \
-    "SUM_APP_TIMEOUT=x|SUM_APP_TIMEOUT must be a whole number of 1 or more (got \"x\")."; do
+    "SUM_APP_TIMEOUT=x|SUM_APP_TIMEOUT must be a whole number of 1 or more (got \"x\")." \
+    "SUM_TIMEOUT=0100|SUM_TIMEOUT must be a whole number of 1 or more (got \"0100\")." \
+    "SUM_MIN_BULLETS=101|SUM_MIN_BULLETS must be 100 or less (got \"101\")." \
+    "SUM_MAX_BULLETS=101|SUM_MAX_BULLETS must be 100 or less (got \"101\")." \
+    "SUM_MAX_CHARS=10000001|SUM_MAX_CHARS must be 10000000 or less (got \"10000001\")." \
+    "SUM_TIMEOUT=100000001|SUM_TIMEOUT must be 100000000 or less (got \"100000001\")." \
+    "SUM_FETCH_TIMEOUT=100000001|SUM_FETCH_TIMEOUT must be 100000000 or less (got \"100000001\")." \
+    "SUM_APP_TIMEOUT=100000001|SUM_APP_TIMEOUT must be 100000000 or less (got \"100000001\")." \
+    "SUM_TIMEOUT=999999999|SUM_TIMEOUT must be 100000000 or less (got \"999999999\")." \
+    "SUM_MAX_BULLETS=123456789012345678901234567890|SUM_MAX_BULLETS must be 100 or less (got \"123456789012345678901234567890\")." \
+    "SUM_MAX_CHARS=123456789012345678901234567890|SUM_MAX_CHARS must be 10000000 or less (got \"123456789012345678901234567890\")." \
+    "SUM_APP_TIMEOUT=123456789012345678901234567890|SUM_APP_TIMEOUT must be 100000000 or less (got \"123456789012345678901234567890\")."; do
   reset_stubs
   clip "Text"
-  # breaks-if: need_count stops rejecting that value
+  # breaks-if: need_count stops rejecting that value, or drops its upper bound
   export "${pair%%|*}"
   summarize clipboard
   unset "${pair%%=*}"
   assert_eq "guard ${pair%%|*}" "${pair#*|}" "$out"
   assert_eq "guard ${pair%%|*} sends nothing" "no" "$(cmd_ran)"
 done
+
+# Each limit itself is allowed, and every timeout at its limit still runs
+# under timeout.pl. A URL clipboard uses all three timeouts.
+for setting in "SUM_MIN_BULLETS=100 SUM_MAX_BULLETS=100" SUM_MAX_CHARS=10000000 \
+    SUM_TIMEOUT=100000000 SUM_FETCH_TIMEOUT=100000000 SUM_APP_TIMEOUT=100000000; do
+  reset_stubs
+  cp "$FIXTURES/article.html" "$STUB_PAGE"
+  clip "https://example.com/tide-pools"
+  # breaks-if: the upper bound in need_count is off by one, or above what timeout.pl accepts
+  read -r -a vars <<<"$setting"
+  export "${vars[@]}"
+  summarize clipboard
+  unset "${vars[@]%%=*}"
+  assert_contains "limit $setting is accepted" "$out" "TL;DR: stub summary."
+done
+
+# An empty setting means its default.
+for name in SUM_MIN_BULLETS SUM_MAX_BULLETS SUM_MAX_CHARS SUM_TIMEOUT SUM_FETCH_TIMEOUT SUM_APP_TIMEOUT; do
+  reset_stubs
+  cp "$FIXTURES/article.html" "$STUB_PAGE"
+  clip "https://example.com/tide-pools"
+  export "$name="
+  summarize clipboard
+  unset "$name"
+  assert_contains "empty $name falls back to its default" "$out" "TL;DR: stub summary."
+done
+reset_stubs
+clip "Text"
+SUM_MIN_BULLETS="" SUM_MAX_BULLETS="" summarize clipboard
+assert_contains "empty bullet counts mean 3 to 10" "$(cat "$STUBS/cmd.prompt")" "Between 3 and 10"
 
 reset_stubs
 clip "Text"
