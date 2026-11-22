@@ -147,18 +147,20 @@ changelog_refused "no entry" "$dir" 1.2.0
 run_release "$dir" 1.2.0
 changelog_refused "no entry, second run" "$dir" 1.2.0
 
-# breaks-if: a heading with no lines below it counts as an entry, giving empty release notes
 dir=$(new_repo emptyentry)
 write_changelog "$dir" "## 1.2.0" "" "  " "## 1.1.0" "" "- Ships 1.1.0."
 commit_all "$dir" "blank 1.2.0 entry"
+# breaks-if: a heading followed only by blank lines counts as an entry, giving empty release notes
 run_release "$dir" 1.2.0
 changelog_refused "blank entry" "$dir" 1.2.0
 write_changelog "$dir" "## 1.2.0" "## 1.1.0" "- Ships 1.1.0."
 commit_all "$dir" "1.2.0 heading right before the next"
+# breaks-if: the awk section reader treats the next "## " heading as part of the 1.2.0 entry
 run_release "$dir" 1.2.0
 changelog_refused "heading before the next heading" "$dir" 1.2.0
 write_changelog "$dir" "## 1.1.0" "- Ships 1.1.0." "## 1.2.0"
 commit_all "$dir" "1.2.0 heading at the end"
+# breaks-if: a heading on the last line of CHANGELOG.md yields a non-empty or crashing notes result
 run_release "$dir" 1.2.0
 changelog_refused "heading at the end of the file" "$dir" 1.2.0
 
@@ -192,7 +194,8 @@ assert_contains "next steps target the current branch" "$out" '--target "main"'
 assert_eq "notes hold only the 1.2.0 entry" "- Ships 1.2.0." "$(cat "$dir/dist/$NOTES")"
 assert_contains "next steps pass the notes file" "$out" "--notes-file dist/$NOTES"
 refute_contains "next steps no longer generate notes" "$out" "--generate-notes"
-assert_eq "notes file stays out of git" "M info.plist" "$(git -C "$dir" status --porcelain | sed 's/^ //')"
+# breaks-if: the release writes the notes file or the artifacts somewhere git tracks
+assert_eq "notes file stays out of git" "" "$(git -C "$dir" status --porcelain -- dist)"
 
 # --- the entry is the last section and spans several lines ---
 dir=$(new_repo lastentry)
@@ -202,6 +205,16 @@ run_release "$dir" 1.2.0
 assert_eq "last-section release exit code" "0" "$code"
 assert_eq "notes keep inner blank lines and drop outer ones" "$(printf -- '- First.\n\n- Second.')" \
   "$(cat "$dir/dist/$NOTES")"
+
+# --- trailing lines that hold only spaces or tabs ---
+dir=$(new_repo wsend)
+write_changelog "$dir" "## 1.2.0" "  " "- First.  " "" "- Second." "  " "$(printf '\t')" "## 1.1.0" "- Ships 1.1.0."
+commit_all "$dir" "whitespace-only lines around the 1.2.0 entry"
+# breaks-if: whitespace-only lines at the end of the entry stay in the notes
+run_release "$dir" 1.2.0
+assert_eq "whitespace-only trailing lines release exit code" "0" "$code"
+assert_eq "notes drop whitespace-only outer lines and keep trailing spaces inside" \
+  "$(printf -- '- First.  \n\n- Second.')" "$(cat "$dir/dist/$NOTES")"
 
 # --- a CHANGELOG.md saved with CRLF line ends ---
 dir=$(new_repo crlf)

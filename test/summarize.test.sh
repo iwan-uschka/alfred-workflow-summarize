@@ -396,6 +396,13 @@ summarize window
 assert_eq "Brave JavaScript off, German message" "Brave Browser does not allow JavaScript from Apple Events. Turn on View > Developer > Allow JavaScript from Apple Events." "$out"
 
 reset_stubs
+window_app com.brave.Browser "Brave Browser"
+export STUB_OSA_ERR="Ausführungsfehler: JavaScript über Apple-Events ist deaktiviert. (12)"
+summarize window
+# breaks-if: apple_error stops matching the hyphenated "Apple-Event" spelling
+assert_eq "Brave JavaScript off, hyphenated Apple-Events" "Brave Browser does not allow JavaScript from Apple Events. Turn on View > Developer > Allow JavaScript from Apple Events." "$out"
+
+reset_stubs
 window_app com.apple.Safari Safari
 export STUB_OSA_ERR="execution error: Safari got an error: You must enable the 'Allow JavaScript from Apple Events' option in Safari's Develop menu to use 'do JavaScript'. (8)"
 summarize window

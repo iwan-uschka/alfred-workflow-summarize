@@ -14,9 +14,8 @@ stdout works too.
 - macOS. The workflow was developed and tested on macOS 26.7 with Safari
   27.0 and is untested on older versions. Older Safari releases may put the
   menu items named under "Permissions and settings" elsewhere. The workflow
-  uses `pbpaste`, `lsappinfo`, `osascript`, `curl`,
-  `textutil` and the system Perl, which all ship with macOS. Nothing from
-  Homebrew is needed.
+  uses `pbpaste`, `lsappinfo`, `osascript`, `curl`, `textutil` and the system
+  Perl, which all ship with macOS. Nothing from Homebrew is needed.
 - A logged-in `claude` (run `claude` once in a terminal), or another command
   set under "Command" in the Configure Workflow screen.
 
@@ -145,7 +144,7 @@ summary:
 | `Could not convert the page at <host> to text.` | textutil failed on the downloaded page. |
 | `Converting the page at <host> timed out after <n> s (SUM_FETCH_TIMEOUT).` | textutil took too long on the downloaded page. |
 | `The page at <host> has too little text to summarize (<n> characters).` | Under 200 characters of text, typical for login walls and pages built by JavaScript. |
-| `<host> sent <type>, not a web page.` | The URL points to something other than HTML, `text/plain` or `text/markdown`, for example a PDF, an image or a `text/csv` file. |
+| `<host> sent <type>, not a web page.` | The URL points to something other than HTML, XHTML or a `text/*` type, for example a PDF, an image or JSON. |
 | `<app> does not allow JavaScript from Apple Events.` | Turn on the setting named in the message (see below). |
 | `Alfred may not control <app>.` | macOS denied the Automation permission (see below). |
 | `<app> did not answer within <n> s (SUM_APP_TIMEOUT).` | The app hung or a permission prompt waited too long. |

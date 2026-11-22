@@ -49,8 +49,9 @@ if [ -f CHANGELOG.md ]; then
     { sub(/\r$/, "") }
     $0 == heading { found = 1; next }
     found && /^## / { exit }
-    found { print }
-  ' CHANGELOG.md | sed -e '/[^[:space:]]/,$!d')"
+    found && /^[[:space:]]*$/ { if (started) blanks = blanks $0 "\n"; next }
+    found { printf "%s", blanks; blanks = ""; started = 1; print }
+  ' CHANGELOG.md)"
 fi
 if [ -z "$NOTES" ]; then
   echo "error: CHANGELOG.md has no entry for ${VERSION}. Add a '## ${VERSION}' section with at least one line before releasing"
