@@ -49,6 +49,15 @@ json_get() {
   ' "$1"
 }
 
+# reset_test_env: drops what the caller's shell exports and the workflow reads,
+# so the tests start from its defaults. That is every SUM_* setting, every
+# sum_* variable Alfred would pass, and NPM_CONFIG_PREFIX, which setup_env in
+# scripts/lib.sh turns into a PATH entry.
+reset_test_env() {
+  local var
+  for var in ${!SUM_*} ${!sum_*} NPM_CONFIG_PREFIX; do unset "$var"; done
+}
+
 finish_tests() {
   echo ""
   echo "${pass} passed, ${fail} failed"

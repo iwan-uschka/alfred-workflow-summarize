@@ -130,8 +130,7 @@ assert_contains "unknown command message" "$out" "usage: text.pl"
 # --- html_to_text on fixtures ---
 # html_to_text reads SUM_TEXTUTIL and SUM_FETCH_TIMEOUT. Drop whatever the
 # caller's shell exports, as test/stubs.sh does for the flow tests.
-for _var in ${!SUM_*} ${!sum_*}; do unset "$_var"; done
-unset _var
+reset_test_env
 # shellcheck source=scripts/summarize.sh
 source "$ROOT/scripts/summarize.sh"
 

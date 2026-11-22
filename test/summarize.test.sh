@@ -13,9 +13,9 @@
 # ZDOTDIR at a .zshenv that defines `claude` as a shell function calling the
 # stub. zsh runs a function before it looks at PATH. Those cases also point
 # HOME at an empty directory, so setup_env adds no ~/.local/bin or other
-# directory under HOME to PATH. /opt/homebrew/bin and /usr/local/bin still
-# come first on PATH, so the function is what keeps a `claude` installed
-# there from running.
+# directory under HOME to PATH, and test/stubs.sh clears NPM_CONFIG_PREFIX.
+# /opt/homebrew/bin and /usr/local/bin still come first on PATH, so the
+# function is what keeps a `claude` installed there from running.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -643,10 +643,10 @@ assert_contains "new job runs after a stale one" "$out" "TL;DR: stub summary."
 # ===================================================== prompt assembly
 
 # A setting the developer's shell exports must not reach the tests.
-leaked=$(SUM_MODEL=opus sum_app_id=com.apple.Notes /bin/bash -c \
-  'source "$1/test/stubs.sh"; printf "%s|%s|%s" "${SUM_MODEL-unset}" "${sum_app_id-unset}" "${SUM_CURL:+stubbed}"' _ "$ROOT")
-# breaks-if: stubs.sh stops unsetting SUM_* and sum_* from the caller's environment
-assert_eq "stubs.sh drops exported SUM_* and sum_* but keeps its stubs" "unset|unset|stubbed" "$leaked"
+leaked=$(SUM_MODEL=opus sum_app_id=com.apple.Notes NPM_CONFIG_PREFIX=/x /bin/bash -c \
+  'source "$1/test/helpers.sh"; source "$1/test/stubs.sh"; printf "%s|%s|%s|%s" "${SUM_MODEL-unset}" "${sum_app_id-unset}" "${NPM_CONFIG_PREFIX-unset}" "${SUM_CURL:+stubbed}"' _ "$ROOT")
+# breaks-if: stubs.sh stops resetting SUM_*, sum_* and NPM_CONFIG_PREFIX from the caller's environment
+assert_eq "stubs.sh drops exported SUM_*, sum_* and NPM_CONFIG_PREFIX but keeps its stubs" "unset|unset|unset|stubbed" "$leaked"
 
 reset_stubs
 clip "Text"
