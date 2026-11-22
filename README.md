@@ -62,7 +62,7 @@ followed by more text, a longer link, a bare `example.com/page`, or a lone
 `http://` is sent as text.
 
 The summary is a `TL;DR:` line followed by 3 to 10 bullets, fewer for short
-input and more for long or dense input. It is in the input's language unless
+input and more for long input. It is in the input's language unless
 you set one.
 
 ## Supported apps

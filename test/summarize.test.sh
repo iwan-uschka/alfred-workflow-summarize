@@ -1110,7 +1110,7 @@ prompt=$(cat "$STUBS/cmd.prompt")
 assert_contains "default prompt is prompt.md" "$prompt" "One line that starts with \"TL;DR:\""
 assert_contains "default bullet range" "$prompt" "Between 3 and 10 bullet points"
 # breaks-if: the prompt stops tying the bullet count to the text length, so a short text may get the maximum
-assert_contains "default bullet count follows the text length" "$prompt" "a text of a few lines gets 3 bullets, a long article gets 10"
+assert_contains "default bullet count follows the text length" "$prompt" "a text of a few lines gets the fewest (3), a long article gets the most (10)"
 assert_contains "default language follows the input" "$prompt" "Write in the same language as the input."
 assert_contains "default prompt asks for no links or images" "$prompt" "Do not include links, images or HTML."
 refute_contains "no placeholder left" "$prompt" "{"
@@ -1122,7 +1122,7 @@ SUM_MIN_BULLETS=2 SUM_MAX_BULLETS=5 SUM_LANGUAGE=German SUM_MODEL=haiku summariz
 prompt=$(cat "$STUBS/cmd.prompt")
 assert_contains "bullet range reaches the prompt" "$prompt" "Between 2 and 5 bullet points"
 # breaks-if: the length rule keeps the default 3 and 10 instead of the configured range
-assert_contains "length rule uses the configured range" "$prompt" "a text of a few lines gets 2 bullets, a long article gets 5"
+assert_contains "length rule uses the configured range" "$prompt" "a text of a few lines gets the fewest (2), a long article gets the most (5)"
 assert_contains "language reaches the prompt" "$prompt" "Write in German."
 assert_eq "model reaches the command" "haiku" "$(cat "$STUBS/cmd.model")"
 
