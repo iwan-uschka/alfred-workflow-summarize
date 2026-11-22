@@ -3,7 +3,7 @@
 # nothing from Homebrew.
 #
 #   text.pl trim                    stdin, without leading and trailing whitespace
-#   text.pl url-host STRING         prints the host and exits 0 if STRING is a URL, else exits 1
+#   text.pl url-host                prints the host and exits 0 if stdin is a URL, else exits 1
 #   text.pl preview N               stdin on one line, cut to N characters plus "…"
 #   text.pl cut N                   stdin cut to N characters; exits 10 when it cut something
 #   text.pl count                   number of characters on stdin
@@ -29,6 +29,10 @@ use JSON::PP;
 # How often Alfred reruns the Text View script while a job is running, in
 # seconds. Alfred accepts 0.1 to 5.0.
 my $RERUN = 0.3;
+
+# Longer than this many characters, the clipboard is text, not a URL. The
+# Script Filter and the job both ask url-host, so they agree.
+my $MAX_URL_CHARS = 2048;
 
 sub slurp_bytes {
     my ($fh) = @_;
@@ -77,9 +81,11 @@ sub positive_int {
 }
 
 # A URL is one token with no whitespace, an http or https scheme in any case,
-# and a non-empty host. A lone "http://" has no host, so it is text.
+# a non-empty host, and at most $MAX_URL_CHARS characters. A lone "http://"
+# has no host, so it is text.
 sub url_host {
     my ($s) = @_;
+    return undef if length $s > $MAX_URL_CHARS;
     return undef if $s =~ /\s/;
     return undef unless $s =~ m{\Ahttps?://([^/?#]*)}i;
     my $host = $1;
@@ -100,7 +106,7 @@ my %commands = (
     'trim' => sub { out_text(trim(stdin_text())) },
 
     'url-host' => sub {
-        my $host = url_host(utf8_in(defined $_[0] ? $_[0] : ''));
+        my $host = url_host(stdin_text());
         exit 1 unless defined $host;
         out_text("$host\n");
     },

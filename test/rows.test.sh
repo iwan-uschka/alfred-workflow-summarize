@@ -80,8 +80,13 @@ rows
 assert_eq "a 2048-character URL shows its host" "example.com" "$(subtitle Clipboard)"
 clip "https://example.com/${pad}a"
 rows
-# breaks-if: the length check before url-host in rows.sh is removed
+# breaks-if: url_host's length limit ($MAX_URL_CHARS in text.pl) is removed or raised above 2048
 assert_contains "a 2049-character clipboard is text, not a URL" "$(subtitle Clipboard)" "https://example.com/aaa"
+clip "https://example.com/$(/usr/bin/perl -e 'print "a" x 300000')"
+rows
+# breaks-if: url_host loses its length limit and the row shows the host of a 300 KB link
+assert_contains "a 300 KB clipboard is text, not a URL" "$(subtitle Clipboard)" "https://example.com/aaa"
+assert_eq "a 300 KB clipboard still gives exit code 0" "0" "$code"
 # breaks-if: the empty branch stops treating an empty or whitespace-only clipboard as empty
 clip ""
 rows

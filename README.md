@@ -35,8 +35,9 @@ Typing after the keyword narrows the rows: `sum cl` shows only Clipboard,
 `sum win` only Active window.
 
 The clipboard counts as a URL only when, after trimming, it is a single
-`http://` or `https://` link with a host. A link followed by more text, a bare
-`example.com/page`, or a lone `http://` is sent as text.
+`http://` or `https://` link with a host, at most 2048 characters long. A link
+followed by more text, a longer link, a bare `example.com/page`, or a lone
+`http://` is sent as text.
 
 The summary is a `TL;DR:` line followed by 3 to 10 bullets, fewer for short
 input and more for long or dense input. It is in the input's language unless
@@ -67,8 +68,8 @@ Open the workflow in Alfred and click "Configure Workflow".
 | Command | `SUM_COMMAND` | `claude -p --model "$SUM_MODEL" --tools "" --no-session-persistence --system-prompt "$SUM_PROMPT"` | The backend. See below. |
 | Model | `SUM_MODEL` | `sonnet` | Handed to the command as `$SUM_MODEL`. |
 | Language | `SUM_LANGUAGE` | empty | Language of the summary. Empty means the language of the input. |
-| Fewest bullets | `SUM_MIN_BULLETS` | `3` | Lower end of the bullet range. |
-| Most bullets | `SUM_MAX_BULLETS` | `10` | Upper end of the bullet range. |
+| Fewest bullets | `SUM_MIN_BULLETS` | `3` | Lower end of the bullet range, at most 100. |
+| Most bullets | `SUM_MAX_BULLETS` | `10` | Upper end of the bullet range, at most 100. |
 | Prompt override | `SUM_PROMPT_OVERRIDE` | empty | Replaces the bundled `prompt.md` when not empty. |
 
 The prompt is `prompt.md` inside the workflow. You can edit it there, or put
@@ -100,10 +101,10 @@ editor).
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `SUM_MAX_CHARS` | `200000` | Longer input is cut to this many characters, and the Text View says so above the summary. |
-| `SUM_TIMEOUT` | `120` | Seconds the command may run. |
-| `SUM_FETCH_TIMEOUT` | `15` | Seconds for downloading a page from a clipboard URL, and again for converting it to text. |
-| `SUM_APP_TIMEOUT` | `60` | Seconds an app may take to answer AppleScript, and the limit for reading the clipboard. The first AppleScript call waits for the macOS permission prompt, so keep this generous. |
+| `SUM_MAX_CHARS` | `200000` | Longer input is cut to this many characters, and the Text View says so above the summary. At most 10000000. |
+| `SUM_TIMEOUT` | `120` | Seconds the command may run. At most 100000000. |
+| `SUM_FETCH_TIMEOUT` | `15` | Seconds for downloading a page from a clipboard URL, and again for converting it to text. At most 100000000. |
+| `SUM_APP_TIMEOUT` | `60` | Seconds an app may take to answer AppleScript, and the limit for reading the clipboard. The first AppleScript call waits for the macOS permission prompt, so keep this generous. At most 100000000. |
 
 ## Messages
 
@@ -138,6 +139,7 @@ summary:
 | `This summary is gone. Run it again from the keyword.` | The Text View asked for a job that no longer exists. |
 | `Pick the "Active window" or "Clipboard" row to summarize.` | Text typed into the Text View, or an unknown argument. |
 | `<VARIABLE> must be a whole number of 1 or more (got "<value>").` | A bullet count, `SUM_MAX_CHARS` or a timeout is not a positive whole number. |
+| `<VARIABLE> must be <max> or less (got "<value>").` | A bullet count is above 100, `SUM_MAX_CHARS` above 10000000, or a timeout above 100000000. |
 | `SUM_MIN_BULLETS (<a>) is larger than SUM_MAX_BULLETS (<b>).` | The bullet range is upside down. |
 | `SUM_COMMAND is empty. Set it in the workflow's Configure Workflow screen.` | The Command setting is blank. |
 | `Input cut to <n> characters (SUM_MAX_CHARS).` | Shown above the summary when the input was longer than the limit. |

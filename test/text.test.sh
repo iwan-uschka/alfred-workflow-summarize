@@ -12,6 +12,8 @@ source "$ROOT/test/helpers.sh"
 
 TP() { /usr/bin/perl "$ROOT/scripts/text.pl" "$@"; }
 TO() { /usr/bin/perl "$ROOT/scripts/timeout.pl" "$@"; }
+# UH STRING: url-host with STRING on stdin.
+UH() { printf '%s' "$1" | TP url-host; }
 
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
@@ -21,31 +23,38 @@ assert_eq "trim strips spaces, tabs and newlines on both ends" "a b" "$(printf '
 assert_eq "trim of only whitespace is empty" "" "$(printf ' \n\t ' | TP trim)"
 
 # --- url-host: what counts as a URL ---
-assert_eq "https URL" "example.com" "$(TP url-host 'https://example.com/a?b=1')"
-assert_eq "scheme in any case" "example.com" "$(TP url-host 'HTTP://Example.COM/x')"
-assert_eq "port and user info are not the host" "example.com" "$(TP url-host 'https://user:pw@example.com:8443/x')"
-assert_eq "no path at all" "example.com" "$(TP url-host 'http://example.com')"
+assert_eq "https URL" "example.com" "$(UH 'https://example.com/a?b=1')"
+assert_eq "scheme in any case" "example.com" "$(UH 'HTTP://Example.COM/x')"
+assert_eq "port and user info are not the host" "example.com" "$(UH 'https://user:pw@example.com:8443/x')"
+assert_eq "no path at all" "example.com" "$(UH 'http://example.com')"
 # breaks-if: url_host accepts a scheme with no host
-TP url-host 'http://' >/dev/null
+UH 'http://' >/dev/null
 assert_eq "lone http:// is text" "1" "$?"
 # breaks-if: url_host accepts an empty host before the path
-TP url-host 'https:///path' >/dev/null
+UH 'https:///path' >/dev/null
 assert_eq "empty host is text" "1" "$?"
 # breaks-if: url_host stops requiring a scheme
-TP url-host 'example.com/page' >/dev/null
+UH 'example.com/page' >/dev/null
 assert_eq "bare domain is text" "1" "$?"
 # breaks-if: url_host accepts schemes other than http and https
-TP url-host 'ftp://example.com/file' >/dev/null
+UH 'ftp://example.com/file' >/dev/null
 assert_eq "ftp URL is text" "1" "$?"
 # breaks-if: url_host stops rejecting whitespace inside the string
-TP url-host $'https://example.com\nmore text' >/dev/null
+UH $'https://example.com\nmore text' >/dev/null
 assert_eq "URL followed by more lines is text" "1" "$?"
 # breaks-if: url_host stops requiring the whole string to be one URL token
-TP url-host 'see https://example.com' >/dev/null
+UH 'see https://example.com' >/dev/null
 assert_eq "text that contains a URL is text" "1" "$?"
-# breaks-if: url-host treats a missing argument as a URL or dies on it
-TP url-host >/dev/null 2>&1
-assert_eq "url-host with no argument is text" "1" "$?"
+# breaks-if: url-host treats empty stdin as a URL or dies on it
+TP url-host </dev/null >/dev/null 2>&1
+assert_eq "url-host with empty stdin is text" "1" "$?"
+pad=$(printf 'a%.0s' $(seq 1 2028))
+assert_eq "a 2048-character URL is a URL" "example.com" "$(UH "https://example.com/$pad")"
+# breaks-if: url_host drops its length limit, so the job fetches what the Script Filter calls text
+UH "https://example.com/${pad}a" >/dev/null
+assert_eq "a 2049-character URL is text" "1" "$?"
+# breaks-if: url_host counts bytes instead of characters
+assert_eq "the length limit counts characters" "example.com" "$(UH "https://example.com/${pad//a/é}")"
 
 # --- preview: the 60-character boundary, counted in characters ---
 s60=$(printf 'a%.0s' $(seq 1 60))
