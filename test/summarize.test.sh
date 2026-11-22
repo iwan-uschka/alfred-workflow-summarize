@@ -803,6 +803,7 @@ run_job_alone clipboard
 # breaks-if: finish stops calling drop_content, so a job that fails before the command keeps clip and curl.err
 refute_content "failed fetch"
 render_until_final "$job"
+# breaks-if: curl.err is deleted before fail builds its message from it
 assert_eq "failed fetch still shows its message" \
   "Could not fetch unreachable.example: curl: (6) Could not resolve host: unreachable.example. $HINT" "$out"
 
@@ -813,6 +814,7 @@ run_job_alone window
 # breaks-if: finish stops calling drop_content, so osascript's stderr stays behind
 refute_content "denied Automation"
 render_until_final "$job"
+# breaks-if: osa.err is deleted before apple_error reads it, so the denial shows as a generic failure
 assert_eq "denied Automation still shows its message" \
   "Alfred may not control Mail. Allow it under System Settings > Privacy & Security > Automation." "$out"
 
@@ -823,6 +825,7 @@ run_job_alone window
 refute_content "unsupported app"
 assert_file "unsupported app wrote done" "$job/done"
 render_until_final "$job"
+# breaks-if: finish removes or overwrites msg, so the not-supported message is lost
 assert_eq "unsupported app still shows its message" "Not supported in Firefox." "$out"
 
 reset_stubs
@@ -845,7 +848,25 @@ unset STUB_CMD_MODE
 # breaks-if: run_command keeps input until the command ends instead of deleting it once stdin is open
 refute_file "running job: input already gone" "$job/input"
 refute_file "running job: clip already gone" "$job/clip"
+# breaks-if: run_command deletes input before the command has it open as stdin, so the command reads nothing
 assert_eq "running job: the command still got the whole input" "Text read while running" "$(cat "$STUBS/cmd.stdin")"
+kill -KILL -- "-$(cat "$job/pid")" 2>/dev/null
+cmd_pid=$(cat "$STUBS/cmd.pid" 2>/dev/null)
+kill -KILL -- "-$cmd_pid" 2>/dev/null || kill -KILL "$cmd_pid" 2>/dev/null
+rm -rf "$job"
+
+# The downloaded page and curl's stderr are gone while the command still runs.
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/tide-pools"
+export STUB_CMD_MODE=hang
+job=$(sum_job="" bash "$SCRIPT" clipboard | json_get '$d->{variables}{sum_job}')
+for _ in $(seq 1 50); do [ -s "$STUBS/cmd.pid" ] && break; sleep 0.1; done
+unset STUB_CMD_MODE
+for f in page curl.err pbpaste.err input input.cut clip; do
+  # breaks-if: run_command stops calling drop_content, so $f stays until the job ends
+  refute_file "running URL job: $f already gone" "$job/$f"
+done
 kill -KILL -- "-$(cat "$job/pid")" 2>/dev/null
 cmd_pid=$(cat "$STUBS/cmd.pid" 2>/dev/null)
 kill -KILL -- "-$cmd_pid" 2>/dev/null || kill -KILL "$cmd_pid" 2>/dev/null
@@ -858,14 +879,30 @@ mkdir -p "$JOBS/job.twice"
 ( source "$SCRIPT"
   JOB="$JOBS/job.twice"
   { drop_content && drop_content; } || echo "drop_content failed"
-  true
   finish
   finish
-  echo "rc=$?" ) >"$STUBS/twice.out" 2>&1
+  echo "ended" ) >"$STUBS/twice.out" 2>&1
 # breaks-if: drop_content or finish errors when the content files are already absent
-assert_eq "finish twice: no error output" "rc=0" "$(cat "$STUBS/twice.out")"
+assert_eq "finish twice: no error output" "ended" "$(cat "$STUBS/twice.out")"
 assert_file "finish twice: done written" "$JOBS/job.twice/done"
 refute_file "finish twice: no failure message" "$JOBS/job.twice/msg"
+rm -rf "$JOBS/job.twice"
+
+# finish with a failing exit status over files that are already gone still
+# writes the message and the done marker.
+mkdir -p "$JOBS/job.twice"
+: >"$JOBS/job.twice/out"
+# shellcheck source=scripts/summarize.sh
+( source "$SCRIPT"
+  JOB="$JOBS/job.twice"
+  drop_content
+  ( exit 5 )
+  finish
+  echo "ended" ) >"$STUBS/twice.out" 2>&1
+# breaks-if: finish skips the failure message when the content files are already absent
+assert_eq "finish after drop_content, failing: no error output" "ended" "$(cat "$STUBS/twice.out")"
+assert_contains "finish after drop_content, failing: names the exit code" "$(cat "$JOBS/job.twice/msg" 2>/dev/null)" "exit code 5"
+assert_file "finish after drop_content, failing: done written" "$JOBS/job.twice/done"
 rm -rf "$JOBS/job.twice"
 
 # ===================================================== prompt assembly

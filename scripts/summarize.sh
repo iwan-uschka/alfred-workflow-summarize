@@ -35,9 +35,10 @@
 # drop_content deletes clip, pbpaste.err, page, curl.err, osa.err, input
 # and input.cut once the command has its input open. finish deletes them
 # again, plus err and status, when the job ends. So a job that ends after
-# its Text View was closed leaves only the files the final render reads
-# until the next start. A job killed before finish runs keeps what it had
-# at that moment, err included, until the next start.
+# its Text View was closed leaves no read text, only source, pid, notice,
+# out, msg, job.err and done, until the next start. A job killed before
+# finish runs keeps what it had at that moment, err included, until an open
+# view renders the failure or, with the view closed, until the next start.
 #
 # Must stay compatible with /bin/bash 3.2 (what Alfred runs).
 set -uo pipefail
