@@ -194,7 +194,11 @@ finish() {
   fi
   drop_content
   rm -f "$JOB/err"
-  : >"$JOB/done"
+  # Order: render deletes the directory only once done exists or the job has
+  # exited, and stop_old_jobs only once the job has exited. done is the last
+  # file written. The braces keep the shell's own "No such file or directory"
+  # out of job.err if the directory is already gone.
+  { : >"$JOB/done"; } 2>/dev/null
   # Only after done: a running view shows status while out is empty.
   rm -f "$JOB/status"
 }

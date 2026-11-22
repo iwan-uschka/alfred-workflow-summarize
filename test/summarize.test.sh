@@ -1412,4 +1412,17 @@ for entry in 2:SUM_MODEL:sonnet 4:SUM_MIN_BULLETS:3 5:SUM_MAX_BULLETS:10; do
   assert_contains "script default $var" "$(grep -F "$var=\"\${$var:-" "$SCRIPT")" ":-${pair#*:}}"
 done
 
+# finish when the job directory vanishes mid-way: nothing may reach job.err.
+fdir="$STUBS/finish-race"
+rm -rf "$fdir"
+mkdir -p "$fdir"
+# breaks-if: finish writes done without silencing the error from a directory that was just deleted
+( source "$SCRIPT"
+  JOB="$fdir"
+  CMD_DIR=""
+  drop_content() { rm -rf "$JOB"; }
+  finish ) 2>"$STUBS/finish-race.err"
+assert_eq "finish into a deleted job directory prints nothing" "" "$(cat "$STUBS/finish-race.err")"
+refute_file "finish does not recreate a deleted job directory" "$fdir"
+
 finish_tests
