@@ -330,8 +330,9 @@ fetch_page() {
 
 # apple_error RC APP SAFARI_OR_CHROMIUM: fails with the message that fits
 # osascript's stderr in $JOB/osa.err. Matches error numbers and the words
-# "JavaScript" plus "Apple Events" or "AppleScript", because macOS and the
-# browsers translate the rest of the message into the system language.
+# "JavaScript" plus "Apple Event", "Apple-Event" or "AppleScript", because
+# macOS and the browsers translate the rest of the message into the system
+# language.
 apple_error() {
   local rc="$1" app="$2" kind="$3" err
   err=$(cat "$JOB/osa.err" 2>/dev/null)

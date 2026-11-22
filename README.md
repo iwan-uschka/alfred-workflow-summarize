@@ -11,15 +11,35 @@ stdout works too.
 ## Requirements
 
 - Alfred 5.5 or later with the Powerpack. Alfred 5.5 added the Text View.
-- macOS. The workflow uses `pbpaste`, `lsappinfo`, `osascript`, `curl`,
-  `textutil` and the system Perl, which all ship with macOS. Nothing from
-  Homebrew is needed.
+- macOS. The workflow was developed and tested on macOS 26.7 with Safari
+  27.0 and is untested on older versions. Older Safari releases may put the
+  menu items named under "Permissions and settings" elsewhere. The workflow
+  uses `pbpaste`, `lsappinfo`, `osascript`, `curl`, `textutil` and the system
+  Perl, which all ship with macOS. Nothing from Homebrew is needed.
 - A logged-in `claude` (run `claude` once in a terminal), or another command
   set under "Command" in the Configure Workflow screen. The default command
   was tested with `claude` 2.1.326. An older `claude` may reject one of its
   options.
 
 ## Install
+
+### From a release
+
+1. Download `Summarize-v<version>.alfredworkflow` and the matching
+   `.sha256` file from the latest release on
+   [GitHub Releases](https://github.com/iwan-uschka/alfred-workflow-summarize/releases),
+   into the same directory.
+2. In that directory, check the download. For example, for 0.1.0:
+
+   ```
+   shasum -a 256 -c Summarize-v0.1.0.alfredworkflow.sha256
+   ```
+
+   It prints `Summarize-v0.1.0.alfredworkflow: OK`. Any other output means
+   the file is damaged or not the released one. Do not import it.
+3. Double-click the `.alfredworkflow` file to import it into Alfred.
+
+### From source
 
 1. Run `./build.sh`. It writes `dist/Summarize.alfredworkflow`.
 2. Double-click that file to import it into Alfred.
@@ -134,11 +154,11 @@ summary:
 | `Could not convert the page at <host> to text.` | textutil failed on the downloaded page. |
 | `Converting the page at <host> timed out after <n> s (SUM_FETCH_TIMEOUT).` | textutil took too long on the downloaded page. |
 | `The page at <host> has too little text to summarize (<n> characters).` | Under 200 characters of text, typical for login walls and pages built by JavaScript. |
-| `<host> sent <type>, not a web page.` | The URL points to a PDF, an image or another file. |
+| `<host> sent <type>, not a web page.` | The URL points to something other than HTML, XHTML or a `text/*` type, for example a PDF, an image or JSON. |
 | `<app> does not allow JavaScript from Apple Events.` | Turn on the setting named in the message (see below). |
 | `Alfred may not control <app>.` | macOS denied the Automation permission (see below). |
 | `<app> did not answer within <n> s (SUM_APP_TIMEOUT).` | The app hung or a permission prompt waited too long. |
-| `Could not read <app>: <error>.` | Any other AppleScript error, for example a browser window without tabs. |
+| `Could not read <app>: <error>` | Any other AppleScript error, for example a browser window without tabs. |
 | `Could not read the clipboard: <error>` | pbpaste failed. |
 | `The clipboard did not answer within <n> s (SUM_APP_TIMEOUT).` | pbpaste hung. |
 | `Could not read prompt.md.` | The bundled prompt file is missing or unreadable. Restore it or set "Prompt override". |

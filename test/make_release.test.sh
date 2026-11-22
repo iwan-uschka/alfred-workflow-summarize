@@ -23,6 +23,7 @@ new_repo() {
   mkdir -p "$dir"
   cp "$ROOT/make_release.sh" "$ROOT/build.sh" "$ROOT/info.plist" "$ROOT/prompt.md" "$ROOT/.gitignore" "$dir/"
   cp -R "$ROOT/scripts" "$dir/scripts"
+  write_changelog "$dir" "## Unreleased" "" "## 1.2.0" "" "- Ships 1.2.0." "" "## 1.1.0" "" "- Ships 1.1.0."
   git init -q -b main "$dir"
   git -C "$dir" config user.email test@example.com
   git -C "$dir" config user.name "Release Test"
@@ -37,6 +38,16 @@ commit_all() {
   git -C "$1" add -A
   git -C "$1" commit -qm "$2"
 }
+
+# write_changelog <dir> <line>...: replaces CHANGELOG.md with a title and the
+# given lines.
+write_changelog() {
+  local dir="$1"
+  shift
+  printf '%s\n' "# Changelog" "" "$@" > "$dir/CHANGELOG.md"
+}
+
+NOTES="Summarize-v1.2.0.notes.md"
 
 plist_version() { plutil -extract version raw -o - "$1/info.plist"; }
 
@@ -108,6 +119,62 @@ run_release "$dir" 1.2.0
 assert_eq "unreachable origin exit code" "1" "$code"
 assert_contains "unreachable origin message" "$out" "error: could not check origin for existing tags"
 
+# --- CHANGELOG.md entry guard ---
+# changelog_refused <label> <dir> <version>: the guard stopped the release
+# before it changed anything.
+changelog_refused() {
+  assert_eq "$1 exit code" "1" "$code"
+  assert_contains "$1 message" "$out" "error: CHANGELOG.md has no entry for $3. Add a '## $3' section"
+  assert_eq "$1 leaves info.plist alone" "$BASE_VERSION" "$(plist_version "$2")"
+  assert_eq "$1 leaves the tree clean" "" "$(git -C "$2" status --porcelain)"
+  refute_file "$1 builds nothing" "$2/dist"
+}
+
+dir=$(new_repo nochangelog)
+git -C "$dir" rm -q CHANGELOG.md
+git -C "$dir" commit -qm "drop changelog"
+# breaks-if: a missing CHANGELOG.md is read as an empty entry that passes, or crashes awk unguarded
+run_release "$dir" 1.2.0
+changelog_refused "missing CHANGELOG.md" "$dir" 1.2.0
+
+dir=$(new_repo noentry)
+write_changelog "$dir" "## Unreleased" "" "- Pending." "" "## 1.1.0" "" "- Ships 1.1.0."
+commit_all "$dir" "no 1.2.0 entry"
+# breaks-if: the CHANGELOG.md entry guard is removed
+run_release "$dir" 1.2.0
+changelog_refused "no entry" "$dir" 1.2.0
+# breaks-if: a refused run leaves a file behind that changes the next run's outcome
+run_release "$dir" 1.2.0
+changelog_refused "no entry, second run" "$dir" 1.2.0
+
+dir=$(new_repo emptyentry)
+write_changelog "$dir" "## 1.2.0" "" "  " "## 1.1.0" "" "- Ships 1.1.0."
+commit_all "$dir" "blank 1.2.0 entry"
+# breaks-if: a heading followed only by blank lines counts as an entry, giving empty release notes
+run_release "$dir" 1.2.0
+changelog_refused "blank entry" "$dir" 1.2.0
+write_changelog "$dir" "## 1.2.0" "## 1.1.0" "- Ships 1.1.0."
+commit_all "$dir" "1.2.0 heading right before the next"
+# breaks-if: the awk section reader treats the next "## " heading as part of the 1.2.0 entry
+run_release "$dir" 1.2.0
+changelog_refused "heading before the next heading" "$dir" 1.2.0
+write_changelog "$dir" "## 1.1.0" "- Ships 1.1.0." "## 1.2.0"
+commit_all "$dir" "1.2.0 heading at the end"
+# breaks-if: a heading on the last line of CHANGELOG.md yields a non-empty or crashing notes result
+run_release "$dir" 1.2.0
+changelog_refused "heading at the end of the file" "$dir" 1.2.0
+
+# Headings that only look like 1.0.1: a longer number, a suffix, a deeper
+# heading, a regex match on the dots, and trailing text.
+dir=$(new_repo nearentry)
+write_changelog "$dir" "## 1.0.10" "- Ships 1.0.10." "## 11.0.1" "- Ships 11.0.1." \
+  "## 1.0.1-rc" "- Ships an rc." "### 1.0.1" "- Deeper heading." "## 1x0x1" "- Not a version." \
+  "## 1.0.1 (draft)" "- Draft."
+commit_all "$dir" "near-miss headings"
+# breaks-if: the heading match becomes a prefix, substring or regex match instead of the whole line
+run_release "$dir" 1.0.1
+changelog_refused "near-miss heading" "$dir" 1.0.1
+
 # --- happy path: version bumped, artifact and a verifiable checksum ---
 dir=$(new_repo ok)
 run_release "$dir" 1.2.0
@@ -124,6 +191,39 @@ else
 fi
 assert_contains "next steps name the tag" "$out" "gh release create v1.2.0"
 assert_contains "next steps target the current branch" "$out" '--target "main"'
+assert_eq "notes hold only the 1.2.0 entry" "- Ships 1.2.0." "$(cat "$dir/dist/$NOTES")"
+assert_contains "next steps pass the notes file" "$out" "--notes-file dist/$NOTES"
+refute_contains "next steps no longer generate notes" "$out" "--generate-notes"
+# breaks-if: the release writes the notes file or the artifacts somewhere git tracks
+assert_eq "notes file stays out of git" "" "$(git -C "$dir" status --porcelain -- dist)"
+
+# --- the entry is the last section and spans several lines ---
+dir=$(new_repo lastentry)
+write_changelog "$dir" "## Unreleased" "" "## 1.1.0" "- Ships 1.1.0." "## 1.2.0" "" "" "- First." "" "- Second." "" ""
+commit_all "$dir" "1.2.0 entry last"
+run_release "$dir" 1.2.0
+assert_eq "last-section release exit code" "0" "$code"
+assert_eq "notes keep inner blank lines and drop outer ones" "$(printf -- '- First.\n\n- Second.')" \
+  "$(cat "$dir/dist/$NOTES")"
+
+# --- trailing lines that hold only spaces or tabs ---
+dir=$(new_repo wsend)
+write_changelog "$dir" "## 1.2.0" "  " "- First.  " "" "- Second." "  " "$(printf '\t')" "## 1.1.0" "- Ships 1.1.0."
+commit_all "$dir" "whitespace-only lines around the 1.2.0 entry"
+# breaks-if: whitespace-only lines at the end of the entry stay in the notes
+run_release "$dir" 1.2.0
+assert_eq "whitespace-only trailing lines release exit code" "0" "$code"
+assert_eq "notes drop whitespace-only outer lines and keep trailing spaces inside" \
+  "$(printf -- '- First.  \n\n- Second.')" "$(cat "$dir/dist/$NOTES")"
+
+# --- a CHANGELOG.md saved with CRLF line ends ---
+dir=$(new_repo crlf)
+printf '# Changelog\r\n\r\n## 1.2.0\r\n\r\n- Ships 1.2.0.\r\n\r\n## 1.1.0\r\n' > "$dir/CHANGELOG.md"
+commit_all "$dir" "CRLF changelog"
+# breaks-if: the heading match stops ignoring a trailing carriage return
+run_release "$dir" 1.2.0
+assert_eq "CRLF changelog release exit code" "0" "$code"
+assert_eq "CRLF changelog notes have no carriage return" "- Ships 1.2.0." "$(cat "$dir/dist/$NOTES")"
 
 # --- the release targets the branch that carries the bump ---
 dir=$(new_repo feature)
@@ -155,5 +255,7 @@ assert_eq "shasum failure exit code" "1" "$code"
 assert_eq "shasum failure restores info.plist" "$BASE_VERSION" "$(plist_version "$dir")"
 refute_file "shasum failure leaves no artifact" "$dir/dist/$ASSET"
 refute_file "shasum failure leaves no checksum" "$dir/dist/$ASSET.sha256"
+# breaks-if: the EXIT trap stops removing the release notes file
+refute_file "shasum failure leaves no notes file" "$dir/dist/$NOTES"
 
 finish_tests

@@ -13,6 +13,7 @@ TAG="v${VERSION}"
 BUILT="dist/Summarize.alfredworkflow"
 RELEASE="dist/Summarize-${TAG}.alfredworkflow"
 ASSET="$(basename "${RELEASE}")"
+NOTES_FILE="${RELEASE%.alfredworkflow}.notes.md"
 
 if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   echo "error: version must be x.y.z (got '${VERSION}')"
@@ -38,6 +39,25 @@ if [ -n "$remote_tag_check" ]; then
   exit 1
 fi
 
+# The release notes are CHANGELOG.md's "## <version>" section: every line up
+# to the next "## " heading, without leading and trailing blank lines or CRLF
+# line ends. The heading has to be the whole line, so "## 1.0.10" is no entry
+# for 1.0.1.
+NOTES=""
+if [ -f CHANGELOG.md ]; then
+  NOTES="$(awk -v heading="## ${VERSION}" '
+    { sub(/\r$/, "") }
+    $0 == heading { found = 1; next }
+    found && /^## / { exit }
+    found && /^[[:space:]]*$/ { if (started) blanks = blanks $0 "\n"; next }
+    found { printf "%s", blanks; blanks = ""; started = 1; print }
+  ' CHANGELOG.md)"
+fi
+if [ -z "$NOTES" ]; then
+  echo "error: CHANGELOG.md has no entry for ${VERSION}. Add a '## ${VERSION}' section with at least one line before releasing"
+  exit 1
+fi
+
 # Without --target, gh creates a new tag at the remote default branch, which
 # lacks the version bump when this runs on another branch.
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
@@ -51,7 +71,7 @@ echo "-> Version: ${VERSION} (tag: ${TAG})"
 # leaves no release file claiming a version info.plist no longer carries.
 BACKUP="$(mktemp)"
 cp info.plist "$BACKUP"
-trap 'cp "$BACKUP" info.plist; rm -f "$BACKUP" "$BUILT" "$RELEASE" "${RELEASE}.sha256"' EXIT
+trap 'cp "$BACKUP" info.plist; rm -f "$BACKUP" "$BUILT" "$RELEASE" "${RELEASE}.sha256" "$NOTES_FILE"' EXIT
 
 plutil -replace version -string "${VERSION}" info.plist
 plutil -lint info.plist
@@ -60,8 +80,10 @@ echo "-> Building workflow..."
 bash ./build.sh >/dev/null
 
 echo "-> Packaging ${RELEASE}..."
-rm -f "${RELEASE}" "${RELEASE}.sha256"
+rm -f "${RELEASE}" "${RELEASE}.sha256" "${NOTES_FILE}"
 cp "${BUILT}" "${RELEASE}"
+# dist/ is ignored by git, so the notes file never shows up as a change.
+printf '%s\n' "$NOTES" > "${NOTES_FILE}"
 # Run shasum from inside dist/, so the checksum file records the bare asset
 # name. Release assets download flat, and `shasum -c` looks the recorded path
 # up relative to the current directory, and a `dist/` prefix would never match.
@@ -85,4 +107,4 @@ echo "  2. Create the GitHub release:"
 echo "     gh release create ${TAG} ${RELEASE} ${RELEASE}.sha256 \\"
 echo "       --target \"${BRANCH}\" \\"
 echo "       --title \"Summarize ${VERSION}\" \\"
-echo "       --generate-notes"
+echo "       --notes-file ${NOTES_FILE}"

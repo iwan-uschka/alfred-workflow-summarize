@@ -35,6 +35,7 @@ sum [filter]  ->  Script Filter (rows.sh)  ->  Text View, script input (summariz
 - `test/`: shell tests, see below. `test/fixtures/` holds small hand-written
   HTML pages.
 - `build.sh`, `make_release.sh`: packaging and releases.
+- `CHANGELOG.md`: one section per release, used as its release notes.
 
 ## How the Text View streams
 
@@ -222,8 +223,14 @@ and a changed keyword.
   `prompt.md`, `scripts/` and `icon.png` if there is one. It sets the
   execute bit on `scripts/*.sh` and `scripts/*.pl` first, because the Text
   View runs `summarize.sh` as a file.
-- `bash make_release.sh x.y.z` bumps `info.plist`'s version, builds
-  `dist/Summarize-vx.y.z.alfredworkflow` plus a `.sha256`, and prints the
-  commit, push and `gh release create` commands. It never commits or
-  publishes on its own, and it restores `info.plist` and removes the
-  artifacts if any step fails.
+- `bash make_release.sh x.y.z` refuses to run unless `CHANGELOG.md` has a
+  `## x.y.z` heading, as the whole line, with at least one line of text
+  below it. It bumps `info.plist`'s version, builds
+  `dist/Summarize-vx.y.z.alfredworkflow` plus a `.sha256`, copies the
+  changelog section to `dist/Summarize-vx.y.z.notes.md`, and prints the
+  commit, push and `gh release create --notes-file` commands. It never
+  commits or publishes on its own, and it restores `info.plist` and removes
+  the artifacts if any step fails.
+- `CHANGELOG.md`: one short sentence per change, as the user sees it. New
+  entries go under `## Unreleased`. Before a release, rename that heading
+  to `## x.y.z` and add a new empty `## Unreleased` above it.
