@@ -678,20 +678,46 @@ for setting in "SUM_MIN_BULLETS=100 SUM_MAX_BULLETS=100" SUM_MAX_CHARS=10000000 
   assert_contains "limit $setting is accepted" "$out" "TL;DR: stub summary."
 done
 
-# An empty setting means its default.
+# The lowest allowed value is accepted. The timeouts at 1 are covered by the
+# tests that make a command, a page or an app hang.
+for setting in "SUM_MIN_BULLETS=1 SUM_MAX_BULLETS=1" SUM_MAX_CHARS=1; do
+  reset_stubs
+  clip "Text"
+  # breaks-if: need_count moves its lower bound above 1
+  read -r -a vars <<<"$setting"
+  export "${vars[@]}"
+  summarize clipboard
+  unset "${vars[@]%%=*}"
+  assert_contains "lower limit $setting is accepted" "$out" "TL;DR: stub summary."
+done
+
+# An empty setting means its default. The loop proves each empty value is
+# accepted, the checks after it prove which default each one gets.
 for name in SUM_MIN_BULLETS SUM_MAX_BULLETS SUM_MAX_CHARS SUM_TIMEOUT SUM_FETCH_TIMEOUT SUM_APP_TIMEOUT; do
   reset_stubs
   cp "$FIXTURES/article.html" "$STUB_PAGE"
   clip "https://example.com/tide-pools"
+  # breaks-if: load_config stops applying its default to an empty setting, and need_count rejects ""
   export "$name="
   summarize clipboard
   unset "$name"
-  assert_contains "empty $name falls back to its default" "$out" "TL;DR: stub summary."
+  assert_contains "empty $name is accepted" "$out" "TL;DR: stub summary."
 done
 reset_stubs
 clip "Text"
 SUM_MIN_BULLETS="" SUM_MAX_BULLETS="" summarize clipboard
 assert_contains "empty bullet counts mean 3 to 10" "$(cat "$STUBS/cmd.prompt")" "Between 3 and 10"
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/tide-pools"
+SUM_FETCH_TIMEOUT="" summarize clipboard
+# breaks-if: an empty SUM_FETCH_TIMEOUT stops falling back to 15 seconds
+assert_contains "empty SUM_FETCH_TIMEOUT means 15 seconds" "$calls" "--max-time 15 "
+reset_stubs
+clip "$(/usr/bin/perl -e 'print "a" x 200001')"
+SUM_MAX_CHARS="" summarize clipboard
+# breaks-if: an empty SUM_MAX_CHARS stops falling back to 200000 characters
+assert_contains "empty SUM_MAX_CHARS means 200000 characters" "$out" "Input cut to 200000 characters (SUM_MAX_CHARS)."
 
 reset_stubs
 clip "Text"
