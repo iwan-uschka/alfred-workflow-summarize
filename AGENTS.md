@@ -51,9 +51,18 @@ the same way.
    plus the command's stdout so far, or a status line before there is any.
 3. Once the job wrote `done`: render the final text without `rerun`, set
    `sum_job` to empty, and delete the job directory.
+4. A job that ended without `done`, because it got a KILL or the launcher
+   could not start it, ends the same way, with "Summarize stopped
+   unexpectedly." and the last lines of `job.err`. A job counts as running
+   only while its pid still runs `summarize.sh --run <job>`. A KILL from
+   outside also kills the job's `timeout.pl`, so a backend running at that
+   moment keeps running, and nothing stops it.
 
 Starting a job stops every older job first (`stop_old_jobs`), so closing the
-Text View mid-run and starting again never leaves a backend running.
+Text View mid-run and starting again never leaves a backend running. It
+sends a TERM to the old job's process group, waits up to 5 seconds for the
+job to end, then sends a KILL if it is still running, and only then deletes
+the directory. The job's EXIT trap writes into that directory while it ends.
 
 The Text View's `behaviour`, `outputmode` and `scriptinput` values in
 `info.plist` are copied from Alfred's own ChatGPT workflow, which uses the
@@ -103,7 +112,9 @@ same script-input Text View. Alfred does not document these numbers.
   and exits 0 even when those fail.
 - **Failures are messages.** The job never exits with an empty Text View.
   `fail` writes one line to `msg`, and the EXIT trap writes a message with
-  the job's last stderr lines when the job dies on its own.
+  the job's last stderr lines when the job dies on its own. A job that
+  ends without its trap running (a KILL, a launcher that could not start)
+  gets "Summarize stopped unexpectedly." from `render` instead.
 - **Error detection survives translation.** macOS and the browsers translate
   AppleScript errors. `apple_error` matches the error number `-1743` and
   the words `JavaScript` plus `Apple Event`, `Apple-Event` or `AppleScript`,
@@ -149,8 +160,9 @@ for t in test/*.test.sh; do bash "$t" || exit 1; done
 - `test/summarize.test.sh`: the Text View flow. Each case runs the rerun
   loop like Alfred until the output has no `rerun`. Covers every source,
   every failure message, the size limit, the timeouts, prompt assembly,
-  config guards, isolation of the command, stopping old jobs, and that the
-  plist's defaults match the script's.
+  config guards, isolation of the command, stopping old jobs, ending the
+  view for a job that died without `done`, and that the plist's defaults
+  match the script's.
 - `test/text.test.sh`: `text.pl`, `timeout.pl` and `html_to_text` against
   the fixtures.
 - `test/helpers.test.sh`: the assertion helpers in `test/helpers.sh`, run

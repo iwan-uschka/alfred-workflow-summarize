@@ -47,19 +47,38 @@ jobs_dir() {
 
 # ---------------------------------------------------------------- the view
 
+# job_running DIR PID: true when PID still runs the job in DIR. A job that
+# was killed or outlived a reboot leaves a stale pid behind, which may now
+# belong to another process.
+job_running() {
+  [ -n "$2" ] || return 1
+  case "$(ps -ww -o command= -p "$2" 2>/dev/null)" in
+    *"summarize.sh --run $1") return 0 ;;
+  esac
+  return 1
+}
+
 # Stops every job still around, for example one whose Text View was closed
-# while the backend was still running, and removes its directory. A job that
-# was killed or outlived a reboot leaves a stale pid behind, so the kill only
-# goes out when that pid still runs this job.
+# while the backend was still running, and removes its directory. The job's
+# EXIT trap still writes into the directory after the TERM, so the directory
+# goes only once the job has ended. A job that is still running after
+# STOP_WAIT_TENTHS tenths of a second gets a KILL, which no trap outlives.
+# That KILL reaches the job and timeout.pl but not the backend, which runs
+# in a group of its own, so the wait has to stay well above timeout.pl's
+# GRACE: by then timeout.pl has already killed the backend.
+STOP_WAIT_TENTHS=50
 stop_old_jobs() {
-  local dir pid
+  local dir pid i
   for dir in "$1"/job.*; do
     [ -d "$dir" ] || continue
     pid=$(cat "$dir/pid" 2>/dev/null)
-    if [ -n "$pid" ] && [ ! -e "$dir/done" ]; then
-      case "$(ps -ww -o command= -p "$pid" 2>/dev/null)" in
-        *"summarize.sh --run $dir") kill -TERM -- "-$pid" 2>/dev/null ;;
-      esac
+    if [ ! -e "$dir/done" ] && job_running "$dir" "$pid"; then
+      kill -TERM -- "-$pid" 2>/dev/null
+      for ((i = 0; i < STOP_WAIT_TENTHS; i++)); do
+        job_running "$dir" "$pid" || break
+        sleep 0.1
+      done
+      job_running "$dir" "$pid" && kill -KILL -- "-$pid" 2>/dev/null
     fi
     rm -rf "$dir"
   done
@@ -87,7 +106,9 @@ start_job() {
   "$PERL" -e 'setpgrp(0, 0); exec @ARGV or die "cannot run $ARGV[0]: $!\n"' \
     /bin/bash "$LIB_DIR/summarize.sh" --run "$job" </dev/null >/dev/null 2>"$job/job.err" &
   printf '%s\n' "$!" >"$job/pid"
-  render "$job"
+  # Not render: until the launcher has started, the pid still shows this
+  # script's command line, and render would take the job for dead.
+  text_pl view-running "$job"
 }
 
 render() {
@@ -97,8 +118,19 @@ render() {
   elif [ -e "$job/done" ]; then
     text_pl view-final "$job"
     rm -rf "$job"
-  else
+  elif job_running "$job" "$(cat "$job/pid" 2>/dev/null)"; then
     text_pl view-running "$job"
+  else
+    # The job ended without writing done: it got a KILL, or the launcher in
+    # start_job could not start it. It may also have written done just now.
+    if [ ! -e "$job/done" ] && [ ! -s "$job/msg" ]; then
+      {
+        echo 'Summarize stopped unexpectedly.'
+        tail -n 3 "$job/job.err" 2>/dev/null
+      } >"$job/msg"
+    fi
+    text_pl view-final "$job"
+    rm -rf "$job"
   fi
 }
 

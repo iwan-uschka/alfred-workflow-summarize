@@ -16,6 +16,8 @@ use warnings;
 use POSIX ();
 
 # Seconds between the polite TERM and the KILL for a command that ignores it.
+# summarize.sh's STOP_WAIT_TENTHS must stay well above this, or stopping an
+# old job KILLs timeout.pl before it has killed the backend.
 my $GRACE = 2;
 
 # A larger value would switch the timeout off instead of setting it: alarm
@@ -29,10 +31,20 @@ unless (defined $secs && $secs =~ /\A[0-9]+\z/ && $secs > 0 && $secs <= $MAX_SEC
     exit 125;
 }
 
+# TERM stays blocked from before the fork until the handlers exist. A TERM
+# in between would otherwise kill this script and leave the command running
+# with no watchdog. A blocked TERM waits and arrives once unblocked. The
+# command gets the caller's mask back, but this script always unblocks TERM,
+# even for a caller that had it blocked, because passing TERM on is its job.
+my $term = POSIX::SigSet->new(POSIX::SIGTERM());
+my $old_mask = POSIX::SigSet->new();
+POSIX::sigprocmask(POSIX::SIG_BLOCK(), $term, $old_mask);
+
 my $pid = fork;
 die "timeout.pl: fork failed: $!\n" unless defined $pid;
 if ($pid == 0) {
     setpgrp(0, 0);
+    POSIX::sigprocmask(POSIX::SIG_SETMASK(), $old_mask);
     { no warnings 'exec'; exec { $ARGV[0] } @ARGV; }
     print STDERR "timeout.pl: cannot run $ARGV[0]: $!\n";
     POSIX::_exit(127);
@@ -59,6 +71,7 @@ $SIG{TERM} = sub {
     alarm $GRACE;
 };
 alarm $secs;
+POSIX::sigprocmask(POSIX::SIG_UNBLOCK(), $term);
 
 my $done;
 do { $done = waitpid($pid, 0) } while ($done == -1 && $!{EINTR});

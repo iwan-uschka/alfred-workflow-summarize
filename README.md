@@ -134,6 +134,7 @@ summary:
 | `Could not read prompt.md.` | The bundled prompt file is missing or unreadable. Restore it or set "Prompt override". |
 | `Could not prepare the input for the command.` | The text helper failed while cutting the input. |
 | `Summarize stopped unexpectedly (exit code <n>).` | The job crashed. Its last stderr lines follow. |
+| `Summarize stopped unexpectedly.` | The job was killed, or it could not start. Its last stderr lines follow. A backend that was running at that moment may keep running. |
 | `This summary is gone. Run it again from the keyword.` | The Text View asked for a job that no longer exists. |
 | `Pick the "Active window" or "Clipboard" row to summarize.` | Text typed into the Text View, or an unknown argument. |
 | `<VARIABLE> must be a whole number of 1 or more (got "<value>").` | A bullet count, `SUM_MAX_CHARS` or a timeout is not a positive whole number. |
