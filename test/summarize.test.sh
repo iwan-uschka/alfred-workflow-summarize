@@ -141,6 +141,16 @@ summarize clipboard
 assert_contains "quoted charset from Content-Type decodes the page" "$(cat "$STUBS/cmd.stdin")" "Café crème."
 
 reset_stubs
+printf 'Caf\xe9 cr\xe8me. %s\n' "$(printf 'Latin-1 page text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
+export STUB_CTYPE='Text/HTML; Charset=ISO-8859-1'
+clip "https://example.com/upper-case-type"
+summarize clipboard
+# breaks-if: fetch_page stops lower-casing the Content-Type before matching it
+assert_contains "mixed-case Content-Type is read as HTML with its charset" "$(cat "$STUBS/cmd.stdin")" "Café crème."
+
+reset_stubs
+# The fixture's text must stay above MIN_PAGE_CHARS (200), or this case fails
+# with "too little text" instead of a charset assertion.
 cp "$FIXTURES/meta-latin1.html" "$STUB_PAGE"
 export STUB_CTYPE="text/html"
 clip "https://example.com/meta-only"
@@ -171,6 +181,22 @@ export STUB_CTYPE="text/markdown"
 clip "https://example.com/notes.md"
 summarize clipboard
 assert_contains "Markdown without a charset is read as UTF-8" "$(cat "$STUBS/cmd.stdin")" "# Notes"$'\n\n'"Grüße."
+
+reset_stubs
+printf '# Notes\n\nCaf\xe9. %s\n' "$(printf 'Markdown text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
+export STUB_CTYPE="text/markdown; charset=iso-8859-1"
+clip "https://example.com/notes-latin1.md"
+summarize clipboard
+# breaks-if: the text/markdown; <params> alternative is removed from the plain-text case
+assert_contains "Markdown with a charset is decoded with it" "$(cat "$STUBS/cmd.stdin")" "Café."
+
+reset_stubs
+printf 'Gr\xc3\xbc\xc3\x9fe. %s\n' "$(printf 'Dotted charset text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
+export STUB_CTYPE="text/plain; charset=ansi_x3.4-1968"
+clip "https://example.com/dotted.txt"
+summarize clipboard
+# breaks-if: the charset parser stops at a dot and reads this page as UTF-8 instead of ASCII
+refute_contains "charset name with a dot is read whole" "$(cat "$STUBS/cmd.stdin")" "Grüße."
 
 reset_stubs
 cp "$FIXTURES/article.html" "$STUB_PAGE"

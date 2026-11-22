@@ -167,6 +167,7 @@ assert_contains "charset from the header decodes Latin-1" "$text" "Café crème 
 
 text=$(html_to_text <"$FIXTURES/meta-utf8.html")
 assert_contains "<meta charset> decodes UTF-8" "$text" "Grüße aus Köln."
+# breaks-if: a <meta> charset is ignored and the UTF-8 bytes are decoded as Latin-1
 refute_contains "<meta charset> page is not read as Latin-1" "$text" "GrÃ¼"
 # breaks-if: strip-html removes <meta> before reading the charset from it, or misses the http-equiv form
 text=$(html_to_text <"$FIXTURES/meta-latin1.html")
@@ -184,16 +185,17 @@ assert_contains "no charset anywhere decodes UTF-8" "$text" "Grüße aus Köln."
 # breaks-if: an unknown <meta> charset fails the page instead of falling back to UTF-8
 text=$(printf '<html><head><meta charset="x-no-such-charset"></head><body><p>Grüße.</p></body></html>' | html_to_text)
 assert_contains "unknown <meta> charset falls back to UTF-8" "$text" "Grüße."
-# breaks-if: meta_charsets stops at the first <meta>, or requires double quotes or lower-case tags
+# breaks-if: meta_charsets stops at the first <meta>, or requires lower-case tags
 text=$(printf '<html><head><meta name="viewport" content="width=device-width"><META CHARSET=iso-8859-1></head><body><p>Caf\xe9.</p></body></html>' | html_to_text)
 assert_contains "charset in a later, upper-case, unquoted <meta> is read" "$text" "Café."
+# breaks-if: meta_charsets requires double quotes around the charset value
 text=$(printf "<html><head><meta charset='iso-8859-1'></head><body><p>Caf\xe9.</p></body></html>" | html_to_text)
 assert_contains "single-quoted <meta> charset is read" "$text" "Café."
 # breaks-if: meta_charsets returns only the first name, so an unknown one hides a later valid one
 text=$(printf '<html><head><meta charset="x-no-such-charset"><meta charset="iso-8859-1"></head><body><p>Caf\xe9.</p></body></html>' | html_to_text)
 assert_contains "unknown <meta> charset falls through to the next <meta>" "$text" "Café."
-# breaks-if: a <meta> naming UTF-16 or UTF-32 is used as is and turns the page into garbage
-for wide in utf-16 UTF-32; do
+# breaks-if: a <meta> naming UTF-16, UTF-32 or UCS-2 is used as is and turns the page into garbage
+for wide in utf-16 UTF-32 ucs-2; do
   text=$(printf '<html><head><meta charset="%s"></head><body><p>Grüße.</p></body></html>' "$wide" | html_to_text)
   assert_contains "<meta charset=$wide> means UTF-8" "$text" "Grüße."
 done
@@ -205,6 +207,7 @@ done
 # breaks-if: meta_charsets runs before comments are removed
 text=$(printf '<html><head><!-- <meta charset="iso-8859-1"> --></head><body><p>Grüße.</p></body></html>' | html_to_text)
 assert_contains "<meta> inside a comment is ignored" "$text" "Grüße."
+# breaks-if: strip-html prints the input bytes or the charset it decoded with instead of UTF-8
 assert_eq "strip-html output is UTF-8 whatever the input charset" "<p>Café</p>" \
   "$(printf '<p>Caf\xe9</p>' | TP strip-html iso-8859-1)"
 # breaks-if: strip-html decodes with a strict check and dies on bad bytes
@@ -227,6 +230,12 @@ assert_eq "decode with a charset" "Café" "$(printf 'Caf\xe9' | TP decode iso-88
 assert_eq "decode without a charset reads UTF-8" "Café" "$(printf 'Caf\xc3\xa9' | TP decode)"
 # breaks-if: decode dies on a charset name Encode does not know
 assert_eq "decode with an unknown charset reads UTF-8" "Café" "$(printf 'Caf\xc3\xa9' | TP decode x-no-such-charset)"
+# breaks-if: iso-8859-1 is decoded as strict Latin-1 and 0x92 becomes a control character
+assert_eq "decode treats iso-8859-1 as windows-1252" "it’s" "$(printf 'it\x92s' | TP decode iso-8859-1)"
+# breaks-if: a UTF-7 or MIME charset from the header is used to decode the text
+for odd in utf-7 MIME-Header; do
+  assert_eq "decode skips the $odd charset" "Gr+APw-e" "$(printf 'Gr+APw-e' | TP decode "$odd")"
+done
 # breaks-if: decode decodes with a strict check and dies on bad bytes
 out=$(printf 'a\xe2\x80' | TP decode)
 assert_eq "decode of a cut-off UTF-8 character exits 0" "0" "$?"

@@ -90,22 +90,33 @@ sub url_host {
     return length $host ? lc $host : undef;
 }
 
+# Browsers decode these labels with a wider charset than Encode's codec of
+# the same name: Latin-1 pages carry Windows-1252 quotes and dashes, and
+# GB2312 pages carry GBK characters.
+my %BROWSER_LABEL = (
+    'iso-8859-1' => 'cp1252', 'latin1' => 'cp1252',
+    'us-ascii'   => 'cp1252', 'ascii'  => 'cp1252',
+    'gb2312'     => 'gbk',
+);
+
 # charset(NAME, ...): the first name Encode knows, else UTF-8. An unknown
-# name falls through to the next one instead of failing the page.
+# name falls through to the next one instead of failing the page. UTF-7 and
+# the MIME codecs are not page charsets and are skipped like unknown names.
 sub charset {
     for my $name (@_) {
         next unless defined $name && length $name;
-        my $enc = Encode::find_encoding($name);
-        return $enc->name if $enc;
+        my $enc = Encode::find_encoding($BROWSER_LABEL{lc $name} // $name);
+        next unless $enc;
+        next if $enc->name =~ /\A(?:UTF-7|MIME-)/i;
+        return $enc->name;
     }
     return 'UTF-8';
 }
 
 # Every charset a page declares in <meta charset="..."> or in
 # <meta http-equiv="Content-Type" content="...; charset=...">, in page order.
-# A page whose bytes can carry a <meta> tag readable as ASCII is not UTF-16
-# or UTF-32, so those names mean UTF-8, as in browsers. UTF-7 and the MIME
-# codecs are not page charsets and are skipped.
+# A page whose bytes can carry a <meta> tag readable as ASCII is not UTF-16,
+# UTF-32 or UCS-2, so those names mean UTF-8, as in browsers.
 sub meta_charsets {
     my ($h) = @_;
     my @names;
@@ -113,8 +124,7 @@ sub meta_charsets {
         next unless $meta =~ /\bcharset\s*=\s*["']?([A-Za-z0-9_.:-]+)/i;
         my $name = $1;
         my $enc = Encode::find_encoding($name);
-        next if $enc && $enc->name =~ /\A(?:UTF-7|MIME-)/i;
-        push @names, $enc && $enc->name =~ /\AUTF-(?:16|32)/i ? 'UTF-8' : $name;
+        push @names, $enc && $enc->name =~ /\A(?:UTF-(?:16|32)|UCS-[24])/i ? 'UTF-8' : $name;
     }
     return @names;
 }

@@ -110,10 +110,13 @@ same script-input Text View. Alfred does not document these numbers.
   not whole English sentences.
 - **HTML to text.** `textutil` alone waits up to 60 seconds for a real
   page's images and stylesheets and then fails. `text.pl strip-html` first
-  decodes the page with the first charset Perl's `Encode` knows: the one
-  in the Content-Type header, then those in the page's `<meta>` tags, then
-  UTF-8. A `<meta>` naming UTF-16 or UTF-32 means UTF-8, as in browsers.
-  Then it removes comments, `head`, `script`, `style`, `nav`, `aside`,
+  removes comments, then decodes the page with the first charset Perl's
+  `Encode` knows: the one in the Content-Type header, then those in the
+  page's `<meta>` tags outside comments, then UTF-8. UTF-7 and the MIME
+  codecs are skipped. A `<meta>` naming UTF-16, UTF-32 or UCS-2 means
+  UTF-8, as in browsers. The labels `iso-8859-1`, `latin1`, `us-ascii` and
+  `ascii` decode as Windows-1252, and `gb2312` as GBK, as in browsers.
+  Then it removes `head`, `script`, `style`, `nav`, `aside`,
   `footer`, form controls (`input`, `button`, `select`, `textarea`) and
   media, plus every tag that loads a resource. `<form>` itself stays,
   because some sites wrap the whole page in one. A page with exactly one

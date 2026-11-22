@@ -237,7 +237,7 @@ fetch_page() {
     2??) ;;
     *) fail "$host answered with HTTP $code. $HINT_ACTIVE_WINDOW" ;;
   esac
-  charset=$(printf '%s\n' "$ctype" | sed -n 's/.*charset="\{0,1\}\([A-Za-z0-9_-]*\).*/\1/p')
+  charset=$(printf '%s\n' "$ctype" | sed -n 's/.*charset="\{0,1\}\([A-Za-z0-9_.:-]*\).*/\1/p')
   case "$ctype" in
     '' | text/html* | application/xhtml*)
       text=$(html_to_text "$charset" <"$JOB/page")
