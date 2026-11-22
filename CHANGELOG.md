@@ -5,6 +5,8 @@ release a version without one and uses that section as the release notes.
 
 ## Unreleased
 
+- The number of summary bullets now follows the length of the text, so a short text no longer gets the maximum.
+
 ## 0.1.0
 
 - The `sum` keyword summarizes the active window or the clipboard in an Alfred Text View.
