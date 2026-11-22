@@ -16,7 +16,7 @@ PERL=/usr/bin/perl
 # The command the "Active window" and "Clipboard" rows feed by default. Kept
 # in sync with the default in info.plist; test/summarize.test.sh checks that.
 # shellcheck disable=SC2016,SC2034 # expanded later by zsh, not here
-DEFAULT_COMMAND='claude -p --model "$SUM_MODEL" --tools "" --no-session-persistence --system-prompt "$SUM_PROMPT"'
+DEFAULT_COMMAND='claude -p --model "$SUM_MODEL" --tools "" --strict-mcp-config --no-session-persistence --system-prompt "$SUM_PROMPT"'
 
 text_pl() { "$PERL" "$LIB_DIR/text.pl" "$@"; }
 

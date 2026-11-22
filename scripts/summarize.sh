@@ -48,7 +48,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 HINT_ACTIVE_WINDOW='Open the page in your browser and use the "Active window" row.'
 # shellcheck disable=SC2016 # the backticks are literal text
-HINT_LOGIN='Run `claude` once in a terminal to log in.'
+HINT_LOGIN='Run `claude` once in a terminal to log in, or update `claude` if it rejected an option.'
 # Fetched pages with less text than this are login walls, cookie banners or
 # pages built by JavaScript, so summarizing them would mislead.
 MIN_PAGE_CHARS=200
@@ -285,7 +285,8 @@ html_to_text() {
 fetch_page() {
   local url="$1" host="$2" meta rc code ctype charset text chars
   status "Fetching ${host}…"
-  meta=$(tool_run SUM_CURL curl "$SUM_FETCH_TIMEOUT" -sS -L \
+  meta=$(tool_run SUM_CURL curl "$SUM_FETCH_TIMEOUT" -q -sS -L --globoff \
+    --proto =http,https --proto-redir =http,https --max-redirs 5 \
     --max-time "$SUM_FETCH_TIMEOUT" --max-filesize "$MAX_PAGE_BYTES" -A "$USER_AGENT" -o "$JOB/page" \
     -w '%{http_code}\n%{content_type}' "$url" 2>"$JOB/curl.err")
   rc=$?
@@ -456,7 +457,7 @@ build_prompt() {
 }
 
 # The first word of SUM_COMMAND without its directory, to tell whether the
-# backend is Claude Code and the login hint applies.
+# backend is Claude Code and the login or update hint applies.
 command_name() {
   local first
   read -r first _ <<<"$SUM_COMMAND"

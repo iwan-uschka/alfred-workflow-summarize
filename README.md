@@ -15,7 +15,9 @@ stdout works too.
   `textutil` and the system Perl, which all ship with macOS. Nothing from
   Homebrew is needed.
 - A logged-in `claude` (run `claude` once in a terminal), or another command
-  set under "Command" in the Configure Workflow screen.
+  set under "Command" in the Configure Workflow screen. The default command
+  was tested with `claude` 2.1.326. An older `claude` may reject one of its
+  options.
 
 ## Install
 
@@ -65,7 +67,7 @@ Open the workflow in Alfred and click "Configure Workflow".
 | Setting | Variable | Default | Meaning |
 | --- | --- | --- | --- |
 | Keyword | `SUM_KEYWORD` | `sum` | The keyword that shows the two rows. |
-| Command | `SUM_COMMAND` | `claude -p --model "$SUM_MODEL" --tools "" --no-session-persistence --system-prompt "$SUM_PROMPT"` | The backend. See below. |
+| Command | `SUM_COMMAND` | `claude -p --model "$SUM_MODEL" --tools "" --strict-mcp-config --no-session-persistence --system-prompt "$SUM_PROMPT"` | The backend. See below. |
 | Model | `SUM_MODEL` | `sonnet` | Handed to the command as `$SUM_MODEL`. |
 | Language | `SUM_LANGUAGE` | empty | Language of the summary. Empty means the language of the input. |
 | Fewest bullets | `SUM_MIN_BULLETS` | `3` | Lower end of the bullet range, at most 100. |
@@ -87,11 +89,18 @@ The command gets two environment variables:
 - `SUM_PROMPT`: the finished prompt.
 
 If the command exits with a non-zero code, the Text View shows its stderr.
-The default command gives Claude Code no tools and saves no session.
+The default command turns off Claude Code's built-in tools with `--tools ""`.
+With `--strict-mcp-config` it ignores every MCP server configuration, because
+it passes no `--mcp-config`. `--no-session-persistence` keeps it from saving a
+session. Plugins and hooks from your Claude Code settings still load.
 
 Output appears in the Text View as the command prints it. `claude -p` with
 its default text output prints the whole summary at once when it is done, so
 with the default command you see "Summarizing…" until the summary appears.
+The Text View never shows a Markdown image or an HTML tag from the output.
+The workflow turns an image into "[image: alt text]", keeps only the text
+of a link and removes HTML tags, so text from a page cannot make Alfred load a
+remote image.
 
 ### Advanced
 
@@ -116,7 +125,7 @@ summary:
 | `Nothing to summarize.` | Empty clipboard, no window, an empty selection on an empty page, or no or an empty Mail message. |
 | `Not supported in <app>.` | The frontmost app is not in the table above. Nothing was sent. |
 | `Select one message in Mail. More than one is selected.` | Several messages are selected. Nothing was sent. |
-| `The command failed with exit code <n>.` | The command's stderr follows. If the command starts with `claude`, the hint "Run `claude` once in a terminal to log in." follows too. |
+| `The command failed with exit code <n>.` | The command's stderr follows. If the command starts with `claude`, the hint "Run `claude` once in a terminal to log in, or update `claude` if it rejected an option." follows too. |
 | `The command timed out after <n> s (SUM_TIMEOUT).` | The command ran too long and was stopped. |
 | `The command returned no summary.` | The command succeeded but printed nothing. |
 | `Could not fetch <host>: <curl error>.` | No connection, an unknown host, a TLS problem. |
@@ -160,6 +169,9 @@ Browsers block page access from AppleScript until you allow it once:
 - Chrome and Brave: View > Developer > Allow JavaScript from Apple Events.
 - Safari: Develop > Developer Settings > Allow JavaScript from Apple Events.
   Turn on the Develop menu first under Safari > Settings > Advanced.
+
+The setting covers the whole browser. Once it is on, any app with Automation
+permission for that browser can run JavaScript in every tab.
 
 Mail needs no extra setting.
 
