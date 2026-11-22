@@ -55,6 +55,12 @@ done
 front "" ""
 rows
 assert_eq "no front app" "No active window" "$(subtitle 'Active window')"
+# breaks-if: front_app stops falling back to the bundle id when lsappinfo reports no name
+front com.example.Unnamed ""
+rows
+assert_eq "app without a name shows its bundle id" "com.example.Unnamed: not supported" "$(subtitle 'Active window')"
+assert_eq "app without a name passes its bundle id as the name" "com.example.Unnamed" \
+  "$(printf '%s' "$out" | json_get '$d->{items}[0]{variables}{sum_app_name}')"
 
 # --- the Clipboard subtitle ---
 front com.apple.Safari Safari

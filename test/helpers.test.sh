@@ -59,4 +59,15 @@ assert_eq "truncated json" "INVALID_JSON" "$(printf '{"a":' | json_get '1')"
 # breaks-if: json_get stops checking $@ after evaluating the expression
 assert_contains "broken expression reported" "$(printf '{"a":1}' | json_get '$d->{a')" "EVAL_ERROR:"
 
+# --- reset_test_env ---
+left=$( export SUM_MODEL=opus sum_app_id=com.apple.Notes NPM_CONFIG_PREFIX=/x SUMMARY=keep sum=keep
+  reset_test_env
+  printf '%s|%s|%s|%s|%s' "${SUM_MODEL-unset}" "${sum_app_id-unset}" "${NPM_CONFIG_PREFIX-unset}" \
+    "${SUMMARY-unset}" "${sum-unset}" )
+# breaks-if: reset_test_env stops unsetting one of SUM_*, sum_* or NPM_CONFIG_PREFIX, or its globs
+# also catch names without the underscore
+assert_eq "reset_test_env drops SUM_*, sum_* and NPM_CONFIG_PREFIX only" "unset|unset|unset|keep|keep" "$left"
+# breaks-if: reset_test_env leaks its loop variable into the caller
+assert_eq "reset_test_env leaves no variable behind" "unset" "$( reset_test_env; printf '%s' "${var-unset}" )"
+
 finish_tests

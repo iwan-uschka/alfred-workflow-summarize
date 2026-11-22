@@ -182,6 +182,8 @@ assert_eq "stderr in the failure message is cleaned too" $'The command failed wi
 # --- clean-text ---
 assert_eq "line separators become newlines, blank runs squeeze to one" \
   $'a\nb\n\nc' "$(printf 'a\xe2\x80\xa8b\n\n\n\n  \nc  \n' | TP clean-text)"
+# breaks-if: clean-text stops turning CRLF and lone CR line ends into newlines
+assert_eq "CRLF and lone CR become newlines" $'a\nb\nc' "$(printf 'a\r\nb\rc\r\n' | TP clean-text)"
 
 # --- fill-prompt ---
 out=$(printf 'Use {min_bullets} to {max_bullets} bullets in {language}. {min_bullets}' | TP fill-prompt 2 7 German)
@@ -203,6 +205,9 @@ assert_eq "unknown command exit code" "255" "$?"
 assert_contains "unknown command message" "$out" "usage: text.pl"
 
 # --- html_to_text on fixtures ---
+# html_to_text reads SUM_TEXTUTIL and SUM_FETCH_TIMEOUT. Drop whatever the
+# caller's shell exports, as test/stubs.sh does for the flow tests.
+reset_test_env
 # shellcheck source=scripts/summarize.sh
 source "$ROOT/scripts/summarize.sh"
 

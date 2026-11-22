@@ -59,6 +59,16 @@ assert_eq "unpacked Script Filter rows run" "Active window|Clipboard" \
   "$(cd "$dir/unpacked" && SUM_PBPASTE=true SUM_LSAPPINFO=true /bin/bash ./scripts/rows.sh "" |
     /usr/bin/perl -MJSON::PP -e 'local $/; print join "|", map { $_->{title} } @{decode_json(<STDIN>)->{items}}')"
 
+# --- Finder's .DS_Store files stay out of the archive ---
+dir=$(stage dsstore)
+printf 'finder\n' > "$dir/scripts/.DS_Store"
+bash "$dir/build.sh" >/dev/null 2>&1
+assert_eq "build with a .DS_Store exit code" "0" "$?"
+# breaks-if: build.sh stops excluding .DS_Store from the zip
+listing=$(unzip -l "$dir/$OUT")
+refute_contains "no .DS_Store in the archive" "$listing" ".DS_Store"
+assert_contains "the scripts next to the .DS_Store are packaged" "$listing" "scripts/summarize.sh"
+
 # --- icon.png is packaged only when it exists ---
 dir=$(stage icon)
 printf 'not really a png\n' > "$dir/icon.png"
@@ -119,5 +129,14 @@ out=$(bash "$dir/build.sh" 2>&1)
 assert_eq "missing prompt.md exit code" "1" "$?"
 assert_contains "missing prompt.md message" "$out" "ERROR: prompt.md not found"
 refute_file "missing prompt.md writes no archive" "$dir/$OUT"
+
+# --- missing info.plist: named ERROR, no archive written ---
+dir=$(stage noplist)
+rm -f "$dir/info.plist"
+# breaks-if: info.plist drops out of the required-file check in build.sh
+out=$(bash "$dir/build.sh" 2>&1)
+assert_eq "missing info.plist exit code" "1" "$?"
+assert_contains "missing info.plist message" "$out" "ERROR: info.plist not found"
+refute_file "missing info.plist writes no archive" "$dir/$OUT"
 
 finish_tests

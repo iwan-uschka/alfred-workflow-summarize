@@ -7,6 +7,11 @@
 # Each stub appends one line per call to $STUB_LOG, so tests can assert what
 # was and was not called.
 
+# Start from the workflow's defaults, whatever the caller's shell exports
+# (reset_test_env in test/helpers.sh, which the caller sources first). The
+# stub selection variables are set again below.
+reset_test_env
+
 STUBS=$(mktemp -d)
 trap 'rm -rf "$STUBS"' EXIT
 export STUB_LOG="$STUBS/calls.log"

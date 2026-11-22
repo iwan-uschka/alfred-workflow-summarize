@@ -190,19 +190,28 @@ for t in test/*.test.sh; do bash "$t" || exit 1; done
   command, and that the plist's defaults match the script's.
 - `test/text.test.sh`: `text.pl`, `timeout.pl` and `html_to_text` against
   the fixtures.
-- `test/helpers.test.sh`: the assertion helpers in `test/helpers.sh`, run
-  in a subshell with fresh counters.
+- `test/helpers.test.sh`: the assertion helpers and `reset_test_env` in
+  `test/helpers.sh`, run in a subshell with fresh counters.
 - `test/build.test.sh`, `test/make_release.test.sh`: packaging and release
   guards in temp copies and throwaway git repos. They never write to this
   repo's `dist/` and never reach the network.
 
-Stubs live in `test/stubs.sh`. The variables `SUM_PBPASTE`, `SUM_LSAPPINFO`,
-`SUM_OSASCRIPT` and `SUM_CURL` replace those tools with a command line split
+Stubs live in `test/stubs.sh`. It first calls `reset_test_env` from
+`test/helpers.sh`, which unsets every `SUM_*` and `sum_*` variable the
+caller's shell exports, plus `NPM_CONFIG_PREFIX`, so the tests start from the
+workflow's defaults. `text.test.sh` calls the same function. The variables `SUM_PBPASTE`, `SUM_LSAPPINFO`, `SUM_OSASCRIPT`,
+`SUM_CURL` and `SUM_TEXTUTIL` replace those tools with a command line split
 on spaces, so the stubs run as `/bin/bash <file>` and need no execute bit.
-`textutil` and `perl` run for real in the flow tests. `SUM_COMMAND` points at a stub backend that logs its stdin,
-working directory, prompt and model. No test can reach the real `claude`:
-the cases that need a command starting with `claude` point `ZDOTDIR` at a
-`.zshenv` defining a `claude` function, which zsh runs before searching PATH.
+`stubs.sh` sets the first four. `textutil` and `perl` run for real in the
+flow tests, except in the two conversion-failure cases, which set
+`SUM_TEXTUTIL` themselves. `SUM_COMMAND` points at a stub backend that logs
+its stdin, working directory, prompt and model. No test can reach the real
+`claude`: the cases that need a command starting with `claude` point
+`ZDOTDIR` at a `.zshenv` defining a `claude` function, which zsh runs before
+searching PATH. They also point `HOME` at an empty directory, so no
+`claude` under `~/.local/bin` or another directory in HOME lands on PATH.
+`/opt/homebrew/bin` and `/usr/local/bin` stay on PATH, so the function, not
+HOME, keeps a `claude` installed there from running.
 
 Each failure-path test has a `# breaks-if:` comment naming the change that
 would turn it red. Failures here are rendered messages with exit code 0, so
