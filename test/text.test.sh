@@ -22,6 +22,22 @@ trap 'rm -rf "$WORK"' EXIT
 assert_eq "trim strips spaces, tabs and newlines on both ends" "a b" "$(printf ' \n\ta b \n\n' | TP trim)"
 assert_eq "trim of only whitespace is empty" "" "$(printf ' \n\t ' | TP trim)"
 
+# --- internal-ip: which addresses a fetch must refuse ---
+II() { printf '%s' "$1" | TP internal-ip; }
+for ip in 127.0.0.1 127.255.255.255 10.0.0.1 172.16.0.1 172.31.255.255 192.168.0.1 \
+  169.254.169.254 100.64.0.1 0.0.0.0 198.18.0.1 224.0.0.1 ::1 :: fe80::1 fc00::1 fd12::1 \
+  ff02::1 ::ffff:127.0.0.1 ::ffff:192.168.0.1 ::ffff:7f00:1 garbage ''; do
+  # breaks-if: internal_ip stops treating this address as internal
+  II "$ip"
+  assert_eq "internal: '$ip'" "0" "$?"
+done
+for ip in 93.184.216.34 8.8.8.8 172.15.255.255 172.32.0.1 100.63.255.255 100.128.0.1 \
+  192.169.0.1 198.20.0.1 2606:4700::1111 ::ffff:8.8.8.8; do
+  # breaks-if: internal_ip refuses public addresses next to the private ranges
+  II "$ip"
+  assert_eq "public: $ip" "1" "$?"
+done
+
 # --- url-host: what counts as a URL ---
 assert_eq "https URL" "example.com" "$(UH 'https://example.com/a?b=1')"
 assert_eq "scheme in any case" "example.com" "$(UH 'HTTP://Example.COM/x')"

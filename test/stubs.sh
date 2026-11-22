@@ -59,8 +59,8 @@ fi
 cat "$STUB_OSA_OUT_FILE"
 STUB
 
-# curl: writes $STUB_PAGE to the -o file and prints "$STUB_HTTP_CODE" and
-# "$STUB_CTYPE" on two lines, like the -w format summarize.sh passes.
+# curl: writes $STUB_PAGE to the -o file and prints "$STUB_REMOTE_IP" (public
+# by default), "$STUB_HTTP_CODE" and "$STUB_CTYPE" on three lines, like the -w format summarize.sh passes.
 # STUB_CURL_RC with STUB_CURL_ERR fails instead; STUB_CURL_HANG=1 sleeps
 # and ignores --max-time.
 cat >"$STUBS/curl" <<'STUB'
@@ -78,7 +78,7 @@ if [ -n "${STUB_CURL_RC:-}" ]; then
   exit "$STUB_CURL_RC"
 fi
 cp "$STUB_PAGE" "$out"
-printf '%s\n%s' "${STUB_HTTP_CODE:-200}" "${STUB_CTYPE-text/html; charset=utf-8}"
+printf '%s\n%s\n%s' "${STUB_REMOTE_IP-93.184.216.34}" "${STUB_HTTP_CODE:-200}" "${STUB_CTYPE-text/html; charset=utf-8}"
 STUB
 
 # The backend. Logs its stdin, working directory, the directory's contents
@@ -128,7 +128,7 @@ reset_stubs() {
   : >"$STUB_LOG"
   rm -f "$STUBS"/cmd.* "$STUBS/last.applescript"
   unset STUB_PBPASTE_FAIL STUB_PBPASTE_HANG STUB_LSAPPINFO_FAIL STUB_OSA_ERR STUB_OSA_RC STUB_OSA_HANG \
-    STUB_CURL_RC STUB_CURL_ERR STUB_CURL_HANG STUB_HTTP_CODE STUB_CTYPE STUB_CMD_MODE
+    STUB_CURL_RC STUB_CURL_ERR STUB_CURL_HANG STUB_REMOTE_IP STUB_HTTP_CODE STUB_CTYPE STUB_CMD_MODE
   clip ""
   front ""
   : >"$STUB_OSA_OUT_FILE"

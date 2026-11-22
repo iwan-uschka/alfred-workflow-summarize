@@ -4,6 +4,8 @@
 #
 #   text.pl trim                    stdin, without leading and trailing whitespace
 #   text.pl url-host                prints the host and exits 0 if stdin is a URL, else exits 1
+#   text.pl internal-ip             exits 0 if stdin is not a public IP address (loopback, private, link-local,
+#                                   other reserved ranges, or unparseable), else exits 1
 #   text.pl preview N               stdin on one line, cut to N characters plus "…"
 #   text.pl cut N                   stdin cut to N characters; exits 10 when it cut something
 #   text.pl count                   number of characters on stdin
@@ -26,6 +28,7 @@
 # as UTF-8, so cutting never splits a multi-byte character.
 use strict;
 use warnings;
+use Socket ();
 use Encode qw(decode encode);
 use JSON::PP;
 
@@ -175,7 +178,39 @@ sub no_remote {
     return $s;
 }
 
+sub internal_ip {
+    my $ip = trim($_[0]);
+    my $bin = Socket::inet_pton(Socket::AF_INET6(), $ip);
+    if (defined $bin) {
+        my @w = unpack 'n8', $bin;
+        # IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible (::a.b.c.d) addresses
+        # are judged as the IPv4 address inside them.
+        if (!grep({ $_ } @w[0 .. 4]) && ($w[5] == 0xffff || $w[5] == 0)
+            && ($w[5] == 0xffff || $w[6] || $w[7] > 1)) {
+            return internal_ip(join '.', unpack 'C4', substr($bin, 12));
+        }
+        return 1 if $w[0] == 0 && !grep({ $_ } @w[1 .. 6]) && $w[7] <= 1;   # :: and ::1
+        return 1 if ($w[0] & 0xfe00) == 0xfc00;   # fc00::/7 unique local
+        return 1 if ($w[0] & 0xffc0) == 0xfe80;   # fe80::/10 link-local
+        return 1 if ($w[0] & 0xff00) == 0xff00;   # multicast
+        return 0;
+    }
+    $bin = Socket::inet_pton(Socket::AF_INET(), $ip);
+    return 1 unless defined $bin;
+    my ($a, $b, $c) = unpack 'C3', $bin;
+    return 1 if $a == 0 || $a == 10 || $a == 127 || $a >= 224;
+    return 1 if $a == 100 && ($b & 0xc0) == 64;    # 100.64/10 shared space
+    return 1 if $a == 169 && $b == 254;
+    return 1 if $a == 172 && ($b & 0xf0) == 16;
+    return 1 if $a == 192 && $b == 168;
+    return 1 if $a == 192 && $b == 0 && $c == 0;
+    return 1 if $a == 198 && ($b & 0xfe) == 18;
+    return 0;
+}
+
 my %commands = (
+    'internal-ip' => sub { exit(internal_ip(stdin_text()) ? 0 : 1) },
+
     'trim' => sub { out_text(trim(stdin_text())) },
 
     'url-host' => sub {

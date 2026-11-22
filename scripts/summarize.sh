@@ -283,12 +283,12 @@ html_to_text() {
 
 # fetch_page URL HOST: writes the page's text to input, or fails.
 fetch_page() {
-  local url="$1" host="$2" meta rc code ctype charset text chars
+  local url="$1" host="$2" meta rc rip code ctype charset text chars
   status "Fetching ${host}…"
   meta=$(tool_run SUM_CURL curl "$SUM_FETCH_TIMEOUT" -q -sS -L --globoff \
     --proto =http,https --proto-redir =http,https --max-redirs 5 \
     --max-time "$SUM_FETCH_TIMEOUT" --max-filesize "$MAX_PAGE_BYTES" -A "$USER_AGENT" -o "$JOB/page" \
-    -w '%{http_code}\n%{content_type}' "$url" 2>"$JOB/curl.err")
+    -w '%{remote_ip}\n%{http_code}\n%{content_type}' "$url" 2>"$JOB/curl.err")
   rc=$?
   # 28 is curl's own --max-time; 124 is the watchdog catching a curl that
   # hangs anyway, for example in DNS.
@@ -297,8 +297,14 @@ fetch_page() {
   elif [ "$rc" -ne 0 ]; then
     fail "Could not fetch $host: $(tr '\n' ' ' <"$JOB/curl.err" | sed 's/ *$//'). $HINT_ACTIVE_WINDOW"
   fi
-  code=$(printf '%s\n' "$meta" | sed -n 1p)
-  ctype=$(printf '%s\n' "$meta" | sed -n 2p | tr '[:upper:]' '[:lower:]')
+  # remote_ip is the server of the last request, after any redirects. Checked
+  # before the body is used, so a redirect into the local network is refused.
+  rip=$(printf '%s\n' "$meta" | sed -n 1p)
+  if printf '%s' "$rip" | text_pl internal-ip; then
+    fail "Refused to fetch $host: it leads to a private, loopback or link-local address (${rip:-unknown}). $HINT_ACTIVE_WINDOW"
+  fi
+  code=$(printf '%s\n' "$meta" | sed -n 2p)
+  ctype=$(printf '%s\n' "$meta" | sed -n 3p | tr '[:upper:]' '[:lower:]')
   case "$code" in
     2??) ;;
     *) fail "$host answered with HTTP $code. $HINT_ACTIVE_WINDOW" ;;

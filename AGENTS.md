@@ -150,6 +150,12 @@ same script-input Text View. Alfred does not document these numbers.
   entities and tables included. Plain text is accepted only as
   `text/plain` or `text/markdown`, decoded with the header's charset, else
   UTF-8. A fetched page with under 200 characters of text is refused.
+- **No internal addresses.** `fetch_page` reads `%{remote_ip}` from curl's
+  `-w` output, the server of the last request after any redirects, and
+  refuses the page before its body is used when `text.pl internal-ip` calls
+  it loopback, private, link-local or otherwise reserved, or when it is
+  empty. curl still sends the request, so the check keeps the response out
+  of the backend but does not stop a blind request to an internal service.
 - **Core tools only.** macOS ships everything the workflow runs: bash 3.2,
   `/usr/bin/perl` with core modules, `curl`, `textutil`, `osascript`.
 

@@ -5,6 +5,8 @@ release a version without one and uses that section as the release notes.
 
 ## Unreleased
 
+- A clipboard URL, or a redirect, that leads to a loopback, private-network or link-local address is refused instead of summarized.
+
 ## 0.2.0
 
 - The number of summary bullets now follows the length of the text, so a short text no longer gets the maximum.
