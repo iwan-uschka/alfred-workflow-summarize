@@ -5,6 +5,8 @@ release a version without one and uses that section as the release notes.
 
 ## Unreleased
 
+- Starting a new summary now also stops a backend left running by a job that was killed.
+
 ## 0.2.0
 
 - The number of summary bullets now follows the length of the text, so a short text no longer gets the maximum.

@@ -807,6 +807,54 @@ assert_eq "the wait for a stopped job is bounded" "1" "$(( SECONDS - start < 15 
 refute_file "the killed job's directory removed" "$JOBS/job.deaf"
 assert_contains "new job runs after a killed one" "$out" "TL;DR: stub summary."
 
+# A backend that ignores TERM, in a group of its own under a job that is
+# stuck, does not outlive the next start.
+reset_stubs
+clip "Text"
+bk="$STUBS/backend-ran"
+rm -f "$bk"
+fake_job job.backend 'trap "" TERM
+/usr/bin/perl -e '\''setpgrp(0, 0); $SIG{TERM} = "IGNORE"; open F, ">", $ARGV[0]; print F "$$\n"; close F; $0 = "deaf-backend"; sleep 60'\'' "$FAKE_OUT/backend.pid" &
+: >"$FAKE_OUT/ready"
+while :; do sleep 0.1; done'
+for _ in $(seq 1 50); do [ -s "$FAKE_OUT/backend.pid" ] && break; sleep 0.1; done
+backend_pid=$(cat "$FAKE_OUT/backend.pid" 2>/dev/null)
+printf '%s\n' "$backend_pid" >"$JOBS/job.backend/backend.pgid"
+summarize clipboard
+sleep 0.3
+# breaks-if: stop_old_jobs stops signalling the backend group recorded in backend.pgid
+if [ -z "$backend_pid" ]; then
+  not_ok "the backend never recorded its pid"
+elif kill -0 "$backend_pid" 2>/dev/null; then
+  not_ok "a backend that ignores TERM should be gone after the next start"
+  kill -KILL "$backend_pid" 2>/dev/null
+else
+  ok
+fi
+kill -KILL -- "-$fake_pid" 2>/dev/null
+
+# A recorded group with no process left, and a garbage record, make
+# stop_old_jobs neither fail nor signal anything.
+reset_stubs
+clip "Text"
+mkdir -p "$JOBS/job.gone" "$JOBS/job.junk"
+printf '%s\n' 999999 >"$JOBS/job.gone/backend.pgid"
+printf '%s\n' '-1' >"$JOBS/job.junk/backend.pgid"
+/usr/bin/perl -e 'setpgrp(0, 0); exec @ARGV' sleep 30 &
+bystander=$!
+printf '%s\n' "$bystander" >"$JOBS/job.gone/pid"
+summarize clipboard
+assert_contains "new job runs despite stale pgid records" "$out" "TL;DR: stub summary."
+# breaks-if: kill_backend signals a record that is not a plain positive group id
+if kill -0 "$bystander" 2>/dev/null; then
+  ok
+  kill "$bystander" 2>/dev/null
+else
+  not_ok "a stale or garbage backend.pgid should not signal anything"
+fi
+refute_file "job with a gone group removed" "$JOBS/job.gone"
+refute_file "job with a junk record removed" "$JOBS/job.junk"
+
 # A finished job's pid is never signalled, even if a process that looks
 # like that job holds it.
 reset_stubs

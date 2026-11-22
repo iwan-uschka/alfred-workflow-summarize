@@ -324,6 +324,18 @@ assert_eq "decode of a cut-off UTF-8 character exits 0" "0" "$?"
 assert_contains "decode turns a cut-off character into U+FFFD" "$out" "a�"
 
 # --- timeout.pl ---
+# The backend's group is recorded while it runs and removed once it ended.
+rm -f "$WORK/pgid"
+SUM_PGID_FILE="$WORK/pgid" TO 5 /bin/bash -c "cat '$WORK/pgid' >'$WORK/pgid.seen'; ps -o pgid= -p \$\$ >'$WORK/pgid.real'"
+# breaks-if: timeout.pl stops writing the backend's process group to SUM_PGID_FILE
+assert_eq "recorded group is the backend's own" "$(tr -d ' \n' <"$WORK/pgid.real")" "$(tr -d ' \n' <"$WORK/pgid.seen")"
+# breaks-if: timeout.pl leaves SUM_PGID_FILE behind after the backend ended
+refute_file "pgid record removed after the backend ended" "$WORK/pgid"
+# An unwritable record path must not stop the command.
+SUM_PGID_FILE="$WORK/no-such-dir/pgid" TO 5 /bin/bash -c 'exit 4'
+# breaks-if: timeout.pl dies or changes the exit code when it cannot write SUM_PGID_FILE
+assert_eq "unwritable pgid file does not stop the command" "4" "$?"
+
 TO 5 /bin/bash -c 'exit 3'
 assert_eq "command's own exit code passes through" "3" "$?"
 assert_eq "command's stdout passes through" "hi" "$(TO 5 /bin/echo hi)"

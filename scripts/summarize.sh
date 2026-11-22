@@ -80,9 +80,26 @@ job_running() {
 # goes only once the job has ended. A job that is still running after
 # STOP_WAIT_TENTHS tenths of a second gets a KILL, which no trap outlives.
 # That KILL reaches the job and timeout.pl but not the backend, which runs
-# in a group of its own, so the wait has to stay well above timeout.pl's
-# GRACE: by then timeout.pl has already killed the backend.
+# in a group of its own. timeout.pl records that group in backend.pgid while
+# the backend runs, and kill_backend signals it. The wait still stays well
+# above timeout.pl's GRACE, so the backend normally ends first.
 STOP_WAIT_TENTHS=50
+
+# Kills the backend's process group recorded in DIR/backend.pgid. It does
+# nothing without a numeric record, or when no process is left in the group,
+# so a backend that already ended (timeout.pl removes the record) never
+# makes it signal a group that has since been reused.
+kill_backend() {
+  local pgid
+  pgid=$(cat "$1/backend.pgid" 2>/dev/null)
+  case "$pgid" in
+    '' | *[!0-9]* | 0 | 1) return 0 ;;
+  esac
+  pgrep -g "$pgid" >/dev/null 2>&1 || return 0
+  kill -KILL -- "-$pgid" 2>/dev/null
+  return 0
+}
+
 stop_old_jobs() {
   local dir pid i
   for dir in "$1"/job.*; do
@@ -95,6 +112,7 @@ stop_old_jobs() {
         sleep 0.1
       done
       job_running "$dir" "$pid" && kill -KILL -- "-$pid" 2>/dev/null
+      kill_backend "$dir"
     fi
     rm -rf "$dir"
   done
@@ -488,7 +506,7 @@ run_command() {
   # before the command starts.
   {
     drop_content
-    (cd "$CMD_DIR" && exec "$PERL" "$LIB_DIR/timeout.pl" "$SUM_TIMEOUT" /bin/zsh -c "$SUM_COMMAND") \
+    (cd "$CMD_DIR" && SUM_PGID_FILE="$JOB/backend.pgid" exec "$PERL" "$LIB_DIR/timeout.pl" "$SUM_TIMEOUT" /bin/zsh -c "$SUM_COMMAND") \
       >"$JOB/out" 2>"$JOB/err"
   } <"$JOB/input"
   rc=$?

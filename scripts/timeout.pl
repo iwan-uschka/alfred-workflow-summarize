@@ -9,6 +9,11 @@
 # TERM sent to this script is passed on to the group the same way, which is
 # how stopping a job also stops the backend it is waiting on.
 #
+# When SUM_PGID_FILE names a file, the command's process group is written to
+# it as soon as the group exists, and the file is removed once the command
+# has been reaped. A caller that has to kill this script can then still stop
+# the command by signalling the recorded group.
+#
 # Exit status: COMMAND's own, 124 on timeout (the same code as GNU timeout),
 # 125 for a bad SECONDS value, 127 when COMMAND cannot be started.
 use strict;
@@ -52,6 +57,12 @@ if ($pid == 0) {
 # Set the group from this side too, so a kill sent right after the fork
 # cannot miss a child that has not called setpgrp yet.
 setpgrp($pid, $pid);
+my $pgid_file = $ENV{SUM_PGID_FILE};
+undef $pgid_file if defined $pgid_file && $pgid_file eq '';
+if (defined $pgid_file && open(my $fh, '>', $pgid_file)) {
+    print $fh "$pid\n";
+    close $fh;
+}
 
 my $timed_out = 0;
 my $stopping = 0;
@@ -77,6 +88,7 @@ my $done;
 do { $done = waitpid($pid, 0) } while ($done == -1 && $!{EINTR});
 my $status = $?;
 alarm 0;
+unlink $pgid_file if defined $pgid_file;
 # The command may have died on the TERM while something else in its group
 # ignored it. Cancelling the alarm cancelled that one's KILL, so send it now.
 kill 'KILL', -$pid if $timed_out;
