@@ -747,6 +747,175 @@ assert_eq "a dead job's own message is kept" "A real failure message." "$out"
 # breaks-if: render skips the rm -rf for a dead job that already wrote its own message
 refute_file "a dead job with a message leaves no directory" "$JOBS/job.hasmsg"
 
+# ===================================================== content on disk
+
+# run_job_alone SOURCE: runs one job to its end with no Text View, the way
+# a job runs on after its view was closed. Sets job.
+run_job_alone() {
+  job="$JOBS/job.alone"
+  rm -rf "$job"
+  mkdir -p "$job"
+  printf '%s\n' "$1" >"$job/source"
+  bash "$SCRIPT" --run "$job" 2>>"$job/job.err"
+}
+
+# refute_content LABEL: no file that holds the text the job read, error
+# output from reading it, or a status line naming the fetched host, is left
+# in $job.
+refute_content() {
+  local f
+  for f in clip pbpaste.err page curl.err osa.err input input.cut err status; do
+    refute_file "$1: no $f left" "$job/$f"
+  done
+}
+
+reset_stubs
+clip "Secret clipboard text"
+run_job_alone clipboard
+# breaks-if: finish or run_command stops deleting clip, pbpaste.err, input or err
+refute_content "finished text job"
+assert_file "finished text job keeps out" "$job/out"
+assert_file "finished text job wrote done" "$job/done"
+render_until_final "$job"
+assert_contains "finished text job still shows the summary" "$out" "TL;DR: stub summary."
+refute_file "finished text job's directory removed by render" "$job"
+
+reset_stubs
+export SUM_MAX_CHARS=3
+clip "Longer than three"
+run_job_alone clipboard
+unset SUM_MAX_CHARS
+# breaks-if: the cut text or the cut notice no longer survives the early deletion
+refute_content "cut job"
+render_until_final "$job"
+assert_contains "cut job still shows the cut notice" "$out" "Input cut to 3 characters (SUM_MAX_CHARS)."
+assert_eq "cut job sent the cut text" "Lon" "$(cat "$STUBS/cmd.stdin")"
+
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/tide-pools"
+run_job_alone clipboard
+# breaks-if: drop_content leaves the downloaded page or curl's stderr behind
+refute_content "finished URL job"
+assert_contains "finished URL job sent the page text" "$(cat "$STUBS/cmd.stdin")" "Volunteers counted"
+
+reset_stubs
+window_app com.apple.mail Mail
+osa_out $'1\nPrivate subject\nAda <ada@example.com>\nPrivate mail body.\n'
+run_job_alone window
+# breaks-if: the mail body stays in the job directory after the job
+refute_content "finished Mail job"
+assert_eq "finished Mail job sent the body" $'Subject: Private subject\nFrom: Ada <ada@example.com>\n\nPrivate mail body.' "$(cat "$STUBS/cmd.stdin")"
+
+reset_stubs
+clip "https://unreachable.example/x"
+export STUB_CURL_RC=6 STUB_CURL_ERR="(6) Could not resolve host: unreachable.example"
+run_job_alone clipboard
+# breaks-if: finish stops calling drop_content, so a job that fails before the command keeps clip and curl.err
+refute_content "failed fetch"
+render_until_final "$job"
+# breaks-if: curl.err is deleted before fail builds its message from it
+assert_eq "failed fetch still shows its message" \
+  "Could not fetch unreachable.example: curl: (6) Could not resolve host: unreachable.example. $HINT" "$out"
+
+reset_stubs
+window_app com.apple.mail Mail
+export STUB_OSA_ERR="execution error: not allowed (-1743)"
+run_job_alone window
+# breaks-if: finish stops calling drop_content, so osascript's stderr stays behind
+refute_content "denied Automation"
+render_until_final "$job"
+# breaks-if: osa.err is deleted before apple_error reads it, so the denial shows as a generic failure
+assert_eq "denied Automation still shows its message" \
+  "Alfred may not control Mail. Allow it under System Settings > Privacy & Security > Automation." "$out"
+
+reset_stubs
+window_app org.mozilla.firefox Firefox
+run_job_alone window
+# breaks-if: finish fails on content files that were never written
+refute_content "unsupported app"
+assert_file "unsupported app wrote done" "$job/done"
+render_until_final "$job"
+# breaks-if: finish removes or overwrites msg, so the not-supported message is lost
+assert_eq "unsupported app still shows its message" "Not supported in Firefox." "$out"
+
+reset_stubs
+clip "Text"
+export STUB_CMD_MODE=fail
+run_job_alone clipboard
+# breaks-if: finish stops deleting err, the command's stderr
+refute_content "failed command"
+render_until_final "$job"
+# breaks-if: err is deleted before run_command copies it into msg
+assert_eq "failed command still shows its stderr" $'The command failed with exit code 3.\nstub: not logged in' "$out"
+
+# The input is gone while the command still runs.
+reset_stubs
+clip "Text read while running"
+export STUB_CMD_MODE=hang
+job=$(sum_job="" bash "$SCRIPT" clipboard | json_get '$d->{variables}{sum_job}')
+for _ in $(seq 1 50); do [ -s "$STUBS/cmd.pid" ] && break; sleep 0.1; done
+unset STUB_CMD_MODE
+# breaks-if: run_command keeps input until the command ends instead of deleting it once stdin is open
+refute_file "running job: input already gone" "$job/input"
+refute_file "running job: clip already gone" "$job/clip"
+# breaks-if: run_command deletes input before the command has it open as stdin, so the command reads nothing
+assert_eq "running job: the command still got the whole input" "Text read while running" "$(cat "$STUBS/cmd.stdin")"
+kill -KILL -- "-$(cat "$job/pid")" 2>/dev/null
+cmd_pid=$(cat "$STUBS/cmd.pid" 2>/dev/null)
+kill -KILL -- "-$cmd_pid" 2>/dev/null || kill -KILL "$cmd_pid" 2>/dev/null
+rm -rf "$job"
+
+# The downloaded page and curl's stderr are gone while the command still runs.
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/tide-pools"
+export STUB_CMD_MODE=hang
+job=$(sum_job="" bash "$SCRIPT" clipboard | json_get '$d->{variables}{sum_job}')
+for _ in $(seq 1 50); do [ -s "$STUBS/cmd.pid" ] && break; sleep 0.1; done
+unset STUB_CMD_MODE
+for f in page curl.err pbpaste.err input input.cut clip; do
+  # breaks-if: run_command stops calling drop_content, so $f stays until the job ends
+  refute_file "running URL job: $f already gone" "$job/$f"
+done
+kill -KILL -- "-$(cat "$job/pid")" 2>/dev/null
+cmd_pid=$(cat "$STUBS/cmd.pid" 2>/dev/null)
+kill -KILL -- "-$cmd_pid" 2>/dev/null || kill -KILL "$cmd_pid" 2>/dev/null
+rm -rf "$job"
+
+# finish and drop_content run again on a job whose files are already gone.
+mkdir -p "$JOBS/job.twice"
+: >"$JOBS/job.twice/out"
+# shellcheck source=scripts/summarize.sh
+( source "$SCRIPT"
+  JOB="$JOBS/job.twice"
+  { drop_content && drop_content; } || echo "drop_content failed"
+  finish
+  finish
+  echo "ended" ) >"$STUBS/twice.out" 2>&1
+# breaks-if: drop_content or finish errors when the content files are already absent
+assert_eq "finish twice: no error output" "ended" "$(cat "$STUBS/twice.out")"
+assert_file "finish twice: done written" "$JOBS/job.twice/done"
+refute_file "finish twice: no failure message" "$JOBS/job.twice/msg"
+rm -rf "$JOBS/job.twice"
+
+# finish with a failing exit status over files that are already gone still
+# writes the message and the done marker.
+mkdir -p "$JOBS/job.twice"
+: >"$JOBS/job.twice/out"
+# shellcheck source=scripts/summarize.sh
+( source "$SCRIPT"
+  JOB="$JOBS/job.twice"
+  drop_content
+  ( exit 5 )
+  finish
+  echo "ended" ) >"$STUBS/twice.out" 2>&1
+# breaks-if: finish skips the failure message when the content files are already absent
+assert_eq "finish after drop_content, failing: no error output" "ended" "$(cat "$STUBS/twice.out")"
+assert_contains "finish after drop_content, failing: names the exit code" "$(cat "$JOBS/job.twice/msg" 2>/dev/null)" "exit code 5"
+assert_file "finish after drop_content, failing: done written" "$JOBS/job.twice/done"
+rm -rf "$JOBS/job.twice"
+
 # ===================================================== prompt assembly
 
 reset_stubs
@@ -903,6 +1072,9 @@ SCRIPT="$STUBS/staged/scripts/summarize.sh" summarize clipboard
 # breaks-if: any non-zero exit of the cut is read as "input was cut"
 assert_eq "a failing cut is an error, not a cut" "Could not prepare the input for the command." "$out"
 assert_eq "a failing cut sends nothing" "no" "$(cmd_ran)"
+SCRIPT="$STUBS/staged/scripts/summarize.sh" run_job_alone clipboard
+# breaks-if: drop_content stops deleting input.cut, which a failed cut leaves behind
+refute_content "failed cut"
 
 reset_stubs
 stage_scripts

@@ -115,6 +115,15 @@ same script-input Text View. Alfred does not document these numbers.
   the job's last stderr lines when the job dies on its own. A job that
   ends without its trap running (a KILL, a launcher that could not start)
   gets "Summarize stopped unexpectedly." from `render` instead.
+- **The read text leaves the disk early.** `run_command` opens `input` as
+  the command's stdin and then deletes it with the other files that hold
+  the read text (`drop_content`). `finish` runs `drop_content` again, so a
+  job that fails before the command keeps nothing either, and it also
+  deletes `err` and `status`. A job that ends after its view was closed
+  leaves no read text, only `source`, `pid`, `out`, `notice`, `msg`,
+  `job.err` and `done`. A job killed before `finish` runs keeps what it had,
+  `err` included, until an open view renders the failure or, with the view
+  closed, until the next start.
 - **Error detection survives translation.** macOS and the browsers translate
   AppleScript errors. `apple_error` matches the error number `-1743` and
   the words `JavaScript` plus `Apple Event`, `Apple-Event` or `AppleScript`,
@@ -161,8 +170,9 @@ for t in test/*.test.sh; do bash "$t" || exit 1; done
   loop like Alfred until the output has no `rerun`. Covers every source,
   every failure message, the size limit, the timeouts, prompt assembly,
   config guards, isolation of the command, stopping old jobs, ending the
-  view for a job that died without `done`, and that the plist's defaults
-  match the script's.
+  view for a job that died without `done`, that the read text leaves the
+  job directory when a job finishes, is cut, fails or is still running its
+  command, and that the plist's defaults match the script's.
 - `test/text.test.sh`: `text.pl`, `timeout.pl` and `html_to_text` against
   the fixtures.
 - `test/helpers.test.sh`: the assertion helpers in `test/helpers.sh`, run

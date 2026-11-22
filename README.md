@@ -173,6 +173,15 @@ the rows are shown. Sending starts only when you press Enter on
 a row, and the "not supported" and "Nothing to summarize." cases send
 nothing.
 
+The workflow keeps the text it read in a job directory under Alfred's
+workflow cache, readable only by your user. It deletes the text as soon
+as it has handed it to the command, or when the job fails before reaching
+the command. A job that is killed outright, or cut off by a restart, leaves
+the text there until an open Text View shows the failure or, if the view is
+closed, until the next run starts. The summary or failure message
+stays there until the Text View shows it, or, if you closed the view
+mid-run, until the next run starts.
+
 ## Checks that need a person
 
 The test suite stubs every app, the clipboard, the network and the backend.
