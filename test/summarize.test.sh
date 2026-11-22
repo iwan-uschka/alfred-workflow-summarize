@@ -583,6 +583,7 @@ fake_job() {
     </dev/null >/dev/null 2>&1 & echo $!)
   printf '%s\n' "$fake_pid" >"$JOBS/$1/pid"
   for _ in $(seq 1 50); do [ -e "$FAKE_OUT/ready" ] && break; sleep 0.1; done
+  [ -e "$FAKE_OUT/ready" ] || not_ok "fake job $1 never signalled ready"
 }
 fake_alive() {
   case "$(ps -ww -o command= -p "$fake_pid" 2>/dev/null)" in
@@ -604,6 +605,7 @@ assert_eq "a stopped job still had its directory while it ended" "yes" "$(cat "$
 # breaks-if: stop_old_jobs skips the rm once it has waited for the job
 refute_file "the stopped job's directory removed afterwards" "$JOBS/job.slow"
 assert_contains "new job runs after waiting" "$out" "TL;DR: stub summary."
+kill -KILL -- "-$fake_pid" 2>/dev/null
 
 # A job that ignores the TERM gets a KILL once the wait is over.
 reset_stubs
@@ -688,12 +690,18 @@ unset STUB_CMD_MODE
 echo "last words of the job" >>"$job/job.err"
 kill -KILL -- "-$(cat "$job/pid")" 2>/dev/null
 cmd_pid=$(cat "$STUBS/cmd.pid" 2>/dev/null)
-kill -KILL -- "-$cmd_pid" 2>/dev/null || kill -KILL "$cmd_pid" 2>/dev/null
+if [ -n "$cmd_pid" ]; then
+  kill -KILL -- "-$cmd_pid" 2>/dev/null || kill -KILL "$cmd_pid" 2>/dev/null
+else
+  not_ok "the hanging command never recorded its pid"
+fi
 render_until_final "$job"
 # breaks-if: render only looks for done and reruns forever for a job that died without it
 assert_eq "a killed job stops the reruns" "-|" "$head"
 assert_contains "a killed job ends with a message" "$out" "Summarize stopped unexpectedly."
+# breaks-if: render drops the tail of job.err from the message of a killed job
 assert_contains "the message carries the job's stderr" "$out" "last words of the job"
+# breaks-if: render skips the rm -rf for a job that was killed before it wrote done
 refute_file "a killed job's directory removed" "$job"
 
 # A job whose pid now runs something else is dead too, and that process
@@ -713,6 +721,7 @@ assert_contains "the reused-pid message carries the job's stderr" "$out" "reused
 if kill -0 "$other_pid" 2>/dev/null; then ok; else not_ok "render should not signal the process that now holds the pid"; fi
 kill "$other_pid" 2>/dev/null
 wait "$other_pid" 2>/dev/null
+# breaks-if: render skips the rm -rf for a job whose pid now belongs to another process
 refute_file "a reused-pid job's directory removed" "$JOBS/job.reused"
 
 # A job directory without a pid, left by a start that failed before it
@@ -724,6 +733,7 @@ render_until_final "$JOBS/job.nopid"
 # breaks-if: job_running treats a missing or empty pid as a running job
 assert_eq "a job without a pid file is not rerun" "-|" "$head"
 assert_contains "a job without a pid file ends with a message" "$out" "Summarize stopped unexpectedly."
+# breaks-if: render skips the rm -rf for a job that has no pid file
 refute_file "a pid-less job's directory removed" "$JOBS/job.nopid"
 
 # A dead job that already wrote its own message keeps it.
@@ -734,6 +744,7 @@ echo "ignored stderr" >"$JOBS/job.hasmsg/job.err"
 render_until_final "$JOBS/job.hasmsg"
 # breaks-if: render writes "stopped unexpectedly" over the message of a job that died before done
 assert_eq "a dead job's own message is kept" "A real failure message." "$out"
+# breaks-if: render skips the rm -rf for a dead job that already wrote its own message
 refute_file "a dead job with a message leaves no directory" "$JOBS/job.hasmsg"
 
 # ===================================================== prompt assembly
@@ -867,7 +878,9 @@ SCRIPT="$STUBS/staged/scripts/summarize.sh" summarize clipboard
 # breaks-if: render keeps rerunning a job whose launcher died before it started
 assert_contains "a job that never started ends with a message" "$out" "Summarize stopped unexpectedly."
 assert_contains "the message carries the launcher's error" "$out" "cannot run /nonexistent/bash"
+# breaks-if: render hands a job whose launcher failed to the backend anyway
 assert_eq "a job that never started sends nothing" "no" "$(cmd_ran)"
+# breaks-if: render skips the rm -rf for a job whose launcher died before it started
 assert_eq "a job that never started leaves no directory" "0" "$(jobs_left)"
 
 reset_stubs

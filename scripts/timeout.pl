@@ -16,6 +16,8 @@ use warnings;
 use POSIX ();
 
 # Seconds between the polite TERM and the KILL for a command that ignores it.
+# summarize.sh's STOP_WAIT_TENTHS must stay well above this, or stopping an
+# old job KILLs timeout.pl before it has killed the backend.
 my $GRACE = 2;
 
 # A larger value would switch the timeout off instead of setting it: alarm

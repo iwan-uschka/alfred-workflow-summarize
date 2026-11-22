@@ -112,7 +112,9 @@ same script-input Text View. Alfred does not document these numbers.
   and exits 0 even when those fail.
 - **Failures are messages.** The job never exits with an empty Text View.
   `fail` writes one line to `msg`, and the EXIT trap writes a message with
-  the job's last stderr lines when the job dies on its own.
+  the job's last stderr lines when the job dies on its own. A job that
+  ends without its trap running (a KILL, a launcher that could not start)
+  gets "Summarize stopped unexpectedly." from `render` instead.
 - **Error detection survives translation.** macOS and the browsers translate
   AppleScript errors. `apple_error` matches the error number `-1743` and
   the words `JavaScript` plus `Apple Event`, `Apple-Event` or `AppleScript`,
@@ -158,8 +160,9 @@ for t in test/*.test.sh; do bash "$t" || exit 1; done
 - `test/summarize.test.sh`: the Text View flow. Each case runs the rerun
   loop like Alfred until the output has no `rerun`. Covers every source,
   every failure message, the size limit, the timeouts, prompt assembly,
-  config guards, isolation of the command, stopping old jobs, and that the
-  plist's defaults match the script's.
+  config guards, isolation of the command, stopping old jobs, ending the
+  view for a job that died without `done`, and that the plist's defaults
+  match the script's.
 - `test/text.test.sh`: `text.pl`, `timeout.pl` and `html_to_text` against
   the fixtures.
 - `test/helpers.test.sh`: the assertion helpers in `test/helpers.sh`, run

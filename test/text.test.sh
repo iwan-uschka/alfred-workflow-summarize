@@ -212,7 +212,10 @@ fi
 # The command inherits the blocked TERM, so the KILL after the grace period
 # is what ends it. Without the handler, Perl dies on the TERM and the
 # command outlives it.
-marker="3.$$"
+# The marker is the sleep's duration: long, so the command cannot end on its
+# own during the check, unique per run, and free of regex characters for pgrep.
+marker="$((100000 + $$))"
+# shellcheck disable=SC2016 # Perl code, not shell
 /usr/bin/perl -MPOSIX -e '
   POSIX::sigprocmask(POSIX::SIG_BLOCK(), POSIX::SigSet->new(POSIX::SIGTERM()));
   kill "TERM", $$;
