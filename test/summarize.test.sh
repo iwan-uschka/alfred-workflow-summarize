@@ -169,6 +169,72 @@ summarize clipboard
 assert_contains "charset from Content-Type decodes the page" "$(cat "$STUBS/cmd.stdin")" "Café crème."
 
 reset_stubs
+printf 'Caf\xe9 cr\xe8me. %s\n' "$(printf 'Latin-1 page text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
+export STUB_CTYPE='text/html; charset="ISO-8859-1"'
+clip "https://example.com/latin1-quoted"
+summarize clipboard
+# breaks-if: the Content-Type parser stops accepting a quoted charset value
+assert_contains "quoted charset from Content-Type decodes the page" "$(cat "$STUBS/cmd.stdin")" "Café crème."
+
+reset_stubs
+printf 'Caf\xe9 cr\xe8me. %s\n' "$(printf 'Latin-1 page text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
+export STUB_CTYPE='Text/HTML; Charset=ISO-8859-1'
+clip "https://example.com/upper-case-type"
+summarize clipboard
+# breaks-if: fetch_page stops lower-casing the Content-Type before matching it
+assert_contains "mixed-case Content-Type is read as HTML with its charset" "$(cat "$STUBS/cmd.stdin")" "Café crème."
+
+reset_stubs
+# The fixture's text must stay above MIN_PAGE_CHARS (200), or this case fails
+# with "too little text" instead of a charset assertion.
+cp "$FIXTURES/meta-latin1.html" "$STUB_PAGE"
+export STUB_CTYPE="text/html"
+clip "https://example.com/meta-only"
+summarize clipboard
+# breaks-if: strip-html removes <meta> before the page's own charset is read
+assert_contains "charset from <meta> alone decodes the page" "$(cat "$STUBS/cmd.stdin")" "Café crème in Latin-1."
+
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+export STUB_CTYPE="application/xhtml+xml; charset=utf-8"
+clip "https://example.com/xhtml"
+summarize clipboard
+# breaks-if: application/xhtml+xml is no longer treated as HTML
+assert_contains "XHTML page is converted" "$(cat "$STUBS/cmd.stdin")" "Volunteers counted"
+refute_contains "XHTML page drops its scripts" "$(cat "$STUBS/cmd.stdin")" "TRACKER_SCRIPT_TEXT"
+
+reset_stubs
+printf 'Caf\xe9 cr\xe8me. %s\n' "$(printf 'Latin-1 plain text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
+export STUB_CTYPE="text/plain; charset=iso-8859-1"
+clip "https://example.com/latin1.txt"
+summarize clipboard
+# breaks-if: plain text ignores the Content-Type charset and is read as UTF-8
+assert_contains "charset from Content-Type decodes plain text" "$(cat "$STUBS/cmd.stdin")" "Café crème."
+
+reset_stubs
+printf '# Notes\n\nGrüße. %s\n' "$(printf 'Markdown text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
+export STUB_CTYPE="text/markdown"
+clip "https://example.com/notes.md"
+summarize clipboard
+assert_contains "Markdown without a charset is read as UTF-8" "$(cat "$STUBS/cmd.stdin")" "# Notes"$'\n\n'"Grüße."
+
+reset_stubs
+printf '# Notes\n\nCaf\xe9. %s\n' "$(printf 'Markdown text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
+export STUB_CTYPE="text/markdown; charset=iso-8859-1"
+clip "https://example.com/notes-latin1.md"
+summarize clipboard
+# breaks-if: the text/markdown; <params> alternative is removed from the plain-text case
+assert_contains "Markdown with a charset is decoded with it" "$(cat "$STUBS/cmd.stdin")" "Café."
+
+reset_stubs
+printf 'Gr\xc3\xbc\xc3\x9fe. %s\n' "$(printf 'Dotted charset text. %.0s' $(seq 1 15))" >"$STUB_PAGE"
+export STUB_CTYPE="text/plain; charset=ansi_x3.4-1968"
+clip "https://example.com/dotted.txt"
+summarize clipboard
+# breaks-if: the charset parser stops at a dot and reads this page as UTF-8 instead of ASCII
+refute_contains "charset name with a dot is read whole" "$(cat "$STUBS/cmd.stdin")" "Grüße."
+
+reset_stubs
 cp "$FIXTURES/article.html" "$STUB_PAGE"
 export STUB_CTYPE=""
 clip "https://example.com/no-type"
@@ -250,6 +316,17 @@ clip "https://example.com/file.pdf"
 summarize clipboard
 # breaks-if: non-text responses are run through the HTML converter
 assert_eq "non-text response message" "example.com sent application/pdf, not a web page. $HINT" "$out"
+
+for ctype in "text/css" "text/javascript; charset=utf-8" "text/plainfoo" "text/markdownfoo"; do
+  reset_stubs
+  printf '%s' "$(printf 'body { color: red; } %.0s' $(seq 1 20))" >"$STUB_PAGE"
+  export STUB_CTYPE="$ctype"
+  clip "https://example.com/asset"
+  summarize clipboard
+  # breaks-if: every text/* type is summarized, not only text/plain and text/markdown
+  assert_eq "$ctype response message" "example.com sent ${ctype%%;*}, not a web page. $HINT" "$out"
+  assert_eq "$ctype response sends nothing" "no" "$(cmd_ran)"
+done
 
 reset_stubs
 cp "$FIXTURES/article.html" "$STUB_PAGE"

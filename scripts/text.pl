@@ -7,7 +7,9 @@
 #   text.pl preview N               stdin on one line, cut to N characters plus "…"
 #   text.pl cut N                   stdin cut to N characters; exits 10 when it cut something
 #   text.pl count                   number of characters on stdin
-#   text.pl strip-html              stdin HTML without scripts, styles, navigation and media tags
+#   text.pl strip-html [CHARSET]    stdin HTML without scripts, styles, navigation and media
+#                                   tags, decoded with charset() and printed as UTF-8
+#   text.pl decode [CHARSET]        stdin decoded with charset() and printed as UTF-8
 #   text.pl clean-text              stdin with Unicode line separators turned into newlines
 #                                   and runs of blank lines squeezed to one
 #   text.pl fill-prompt MIN MAX LANGUAGE
@@ -20,8 +22,8 @@
 #   text.pl view-final JOB_DIR      the same for a finished job
 #   text.pl view-message TEXT       Text View JSON holding only TEXT
 #
-# Characters, not bytes: everything except strip-html decodes stdin as UTF-8,
-# so cutting never splits a multi-byte character.
+# Characters, not bytes: everything except strip-html and decode reads stdin
+# as UTF-8, so cutting never splits a multi-byte character.
 use strict;
 use warnings;
 use Encode qw(decode encode);
@@ -95,6 +97,45 @@ sub url_host {
     return length $host ? lc $host : undef;
 }
 
+# Browsers decode these labels with a wider charset than Encode's codec of
+# the same name: Latin-1 pages carry Windows-1252 quotes and dashes, and
+# GB2312 pages carry GBK characters.
+my %BROWSER_LABEL = (
+    'iso-8859-1' => 'cp1252', 'latin1' => 'cp1252',
+    'us-ascii'   => 'cp1252', 'ascii'  => 'cp1252',
+    'gb2312'     => 'gbk',
+);
+
+# charset(NAME, ...): the first name Encode knows, else UTF-8. An unknown
+# name falls through to the next one instead of failing the page. UTF-7 and
+# the MIME codecs are not page charsets and are skipped like unknown names.
+sub charset {
+    for my $name (@_) {
+        next unless defined $name && length $name;
+        my $enc = Encode::find_encoding($BROWSER_LABEL{lc $name} // $name);
+        next unless $enc;
+        next if $enc->name =~ /\A(?:UTF-7|MIME-)/i;
+        return $enc->name;
+    }
+    return 'UTF-8';
+}
+
+# Every charset a page declares in <meta charset="..."> or in
+# <meta http-equiv="Content-Type" content="...; charset=...">, in page order.
+# A page whose bytes can carry a <meta> tag readable as ASCII is not UTF-16,
+# UTF-32 or UCS-2, so those names mean UTF-8, as in browsers.
+sub meta_charsets {
+    my ($h) = @_;
+    my @names;
+    for my $meta ($h =~ /<meta\b[^>]*>/gi) {
+        next unless $meta =~ /\bcharset\s*=\s*["']?([A-Za-z0-9_.:-]+)/i;
+        my $name = $1;
+        my $enc = Encode::find_encoding($name);
+        push @names, $enc && $enc->name =~ /\A(?:UTF-(?:16|32)|UCS-[24])/i ? 'UTF-8' : $name;
+    }
+    return @names;
+}
+
 sub json_out {
     my ($data) = @_;
     binmode STDOUT;
@@ -163,26 +204,30 @@ my %commands = (
 
     'count' => sub { print length(stdin_text()), "\n" },
 
-    # Works on bytes: the page's encoding is textutil's business, and the
-    # tag names matched here are plain ASCII in every encoding a page uses.
+    'decode' => sub { out_text(decode(charset($_[0]), slurp_bytes(\*STDIN))) },
+
+    # The charset from the HTTP header (the argument) wins over the page's
+    # own <meta>, which this removes along with the rest of <head>. The
+    # output is UTF-8, so textutil needs no charset of its own.
     'strip-html' => sub {
-        my $h = slurp_bytes(\*STDIN);
-        $h =~ s/<!--.*?-->//gs;
+        my $bytes = slurp_bytes(\*STDIN);
+        $bytes =~ s/<!--.*?-->//gs;
+        my $h = decode(charset($_[0], meta_charsets($bytes)), $bytes);
         # A page with exactly one <main> keeps only that, which drops site
         # navigation that is not marked up as <nav>.
         my @mains = $h =~ /<main(?![\w-])/gi;
         if (@mains == 1 && $h =~ m{(<main(?![\w-])[^>]*>.*</main\s*>)}si) {
             $h = "<html><body>$1</body></html>";
         }
+        # <form> itself stays: some sites wrap the whole page in one.
         for my $tag (qw(head script style noscript template svg math iframe
-                        object canvas nav aside footer form button select)) {
+                        object canvas nav aside footer button select textarea)) {
             $h =~ s{<$tag(?![\w-])[^>]*>.*?</$tag\s*>}{}gsi;
         }
         # Tags that make textutil load a resource. textutil waits for those
         # and gives up after 60 seconds on a typical news page.
         $h =~ s{<(?:img|link|meta|base|video|audio|source|picture|embed|input|track)\b[^>]*>}{}gsi;
-        binmode STDOUT;
-        print $h;
+        out_text($h);
     },
 
     'clean-text' => sub {
