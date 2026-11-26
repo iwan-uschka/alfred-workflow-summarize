@@ -7,6 +7,7 @@ release a version without one and uses that section as the release notes.
 
 - A clipboard URL, or a redirect, that leads to a loopback, private-network or link-local address is refused instead of summarized.
 - Starting a new summary now also stops a backend left running by a job that was killed.
+- The workflow has its own icon in Alfred.
 
 ## 0.2.0
 
