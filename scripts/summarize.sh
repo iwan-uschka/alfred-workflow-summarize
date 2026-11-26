@@ -28,7 +28,9 @@
 #   notice       a note shown above the summary (input was cut)
 #   out          the command's stdout, growing while it runs
 #   err          the command's stderr
-#   job.err      the job's own stderr, shown only if the job dies unexpectedly
+#   backend.pgid the command's process group while it runs (timeout.pl
+#                writes it and removes it once the command has ended)
+#   job.err     the job's own stderr, shown only if the job dies unexpectedly
 #   msg          the failure message, if any
 #   done         exists once the job has finished
 #
@@ -37,8 +39,9 @@
 # again, plus err and status, when the job ends. So a job that ends after
 # its Text View was closed leaves no read text, only source, pid, notice,
 # out, msg, job.err and done, until the next start. A job killed before
-# finish runs keeps what it had at that moment, err included, until an open
-# view renders the failure or, with the view closed, until the next start.
+# finish runs keeps what it had at that moment, err and backend.pgid
+# included, until an open view renders the failure or, with the view closed,
+# until the next start.
 #
 # Must stay compatible with /bin/bash 3.2 (what Alfred runs).
 set -uo pipefail
@@ -80,21 +83,45 @@ job_running() {
 # goes only once the job has ended. A job that is still running after
 # STOP_WAIT_TENTHS tenths of a second gets a KILL, which no trap outlives.
 # That KILL reaches the job and timeout.pl but not the backend, which runs
-# in a group of its own, so the wait has to stay well above timeout.pl's
-# GRACE: by then timeout.pl has already killed the backend.
+# in a group of its own. timeout.pl records that group in backend.pgid while
+# the backend runs, and kill_backend signals it. The wait still stays well
+# above timeout.pl's GRACE, so the backend normally ends first.
 STOP_WAIT_TENTHS=50
+
+# Kills the backend's process group recorded in DIR/backend.pgid. It does
+# nothing without a numeric record, or when no process is left in the group.
+# A backend that ended normally leaves no record, because timeout.pl removes
+# it. A record left by a job killed from outside can name a group id that
+# has since been reused: pgrep only shows that some process is in the group,
+# not that it is the old backend.
+kill_backend() {
+  local pgid
+  pgid=$(cat "$1/backend.pgid" 2>/dev/null)
+  case "$pgid" in
+    '' | *[!0-9]* | 0 | 1) return 0 ;;
+  esac
+  pgrep -g "$pgid" >/dev/null 2>&1 || return 0
+  kill -KILL -- "-$pgid" 2>/dev/null
+  return 0
+}
+
 stop_old_jobs() {
   local dir pid i
   for dir in "$1"/job.*; do
     [ -d "$dir" ] || continue
     pid=$(cat "$dir/pid" 2>/dev/null)
-    if [ ! -e "$dir/done" ] && job_running "$dir" "$pid"; then
-      kill -TERM -- "-$pid" 2>/dev/null
-      for ((i = 0; i < STOP_WAIT_TENTHS; i++)); do
-        job_running "$dir" "$pid" || break
-        sleep 0.1
-      done
-      job_running "$dir" "$pid" && kill -KILL -- "-$pid" 2>/dev/null
+    if [ ! -e "$dir/done" ]; then
+      if job_running "$dir" "$pid"; then
+        kill -TERM -- "-$pid" 2>/dev/null
+        for ((i = 0; i < STOP_WAIT_TENTHS; i++)); do
+          job_running "$dir" "$pid" || break
+          sleep 0.1
+        done
+        job_running "$dir" "$pid" && kill -KILL -- "-$pid" 2>/dev/null
+      fi
+      # Also for a job that is no longer running: a KILL from outside took
+      # its timeout.pl down too, so the backend may still run.
+      kill_backend "$dir"
     fi
     rm -rf "$dir"
   done
@@ -146,6 +173,9 @@ render() {
       } >"$job/msg"
     fi
     text_pl view-final "$job"
+    # A KILL that ended the job also ended its timeout.pl, so the backend
+    # may still run. Its record goes with the directory.
+    [ -e "$job/done" ] || kill_backend "$job"
     rm -rf "$job"
   fi
 }
@@ -293,12 +323,12 @@ html_to_text() {
 
 # fetch_page URL HOST: writes the page's text to input, or fails.
 fetch_page() {
-  local url="$1" host="$2" meta rc code ctype charset text chars
+  local url="$1" host="$2" meta rc rip code ctype charset text chars
   status "Fetching ${host}…"
   meta=$(tool_run SUM_CURL curl "$SUM_FETCH_TIMEOUT" -q -sS -L --globoff \
     --proto =http,https --proto-redir =http,https --max-redirs 5 \
     --max-time "$SUM_FETCH_TIMEOUT" --max-filesize "$MAX_PAGE_BYTES" -A "$USER_AGENT" -o "$JOB/page" \
-    -w '%{http_code}\n%{content_type}' "$url" 2>"$JOB/curl.err")
+    -w '%{remote_ip}\n%{http_code}\n%{content_type}' "$url" 2>"$JOB/curl.err")
   rc=$?
   # 28 is curl's own --max-time; 124 is the watchdog catching a curl that
   # hangs anyway, for example in DNS.
@@ -307,8 +337,17 @@ fetch_page() {
   elif [ "$rc" -ne 0 ]; then
     fail "Could not fetch $host: $(tr '\n' ' ' <"$JOB/curl.err" | sed 's/ *$//'). $HINT_ACTIVE_WINDOW"
   fi
-  code=$(printf '%s\n' "$meta" | sed -n 1p)
-  ctype=$(printf '%s\n' "$meta" | sed -n 2p | tr '[:upper:]' '[:lower:]')
+  # remote_ip is the server of the last request, after any redirects. Checked
+  # before the body is used, so a redirect into the local network is refused.
+  # Earlier hops are not seen: a chain that passes an internal address and
+  # ends on a public one is accepted. Only exit 0 from public-ip accepts the
+  # page, so a crash of the helper refuses it too.
+  rip=$(printf '%s\n' "$meta" | sed -n 1p)
+  if ! printf '%s' "$rip" | text_pl public-ip; then
+    fail "Refused to fetch $host: it leads to a private, loopback or link-local address (${rip:-unknown}). $HINT_ACTIVE_WINDOW"
+  fi
+  code=$(printf '%s\n' "$meta" | sed -n 2p)
+  ctype=$(printf '%s\n' "$meta" | sed -n 3p | tr '[:upper:]' '[:lower:]')
   case "$code" in
     2??) ;;
     *) fail "$host answered with HTTP $code. $HINT_ACTIVE_WINDOW" ;;
@@ -498,7 +537,7 @@ run_command() {
   # before the command starts.
   {
     drop_content
-    (cd "$CMD_DIR" && exec "$PERL" "$LIB_DIR/timeout.pl" "$SUM_TIMEOUT" /bin/zsh -c "$SUM_COMMAND") \
+    (cd "$CMD_DIR" && SUM_PGID_FILE="$JOB/backend.pgid" exec "$PERL" "$LIB_DIR/timeout.pl" "$SUM_TIMEOUT" /bin/zsh -c "$SUM_COMMAND") \
       >"$JOB/out" 2>"$JOB/err"
   } <"$JOB/input"
   rc=$?

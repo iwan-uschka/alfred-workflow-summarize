@@ -105,6 +105,9 @@ assert_eq "url: curl ignores ~/.curlrc" "curl -q " "$(grep '^curl ' <<<"$calls" 
 assert_contains "url: curl fetches only http and https" "$calls" " --proto =http,https --proto-redir =http,https "
 # breaks-if: the redirect limit is dropped and curl follows up to 50 redirects
 assert_contains "url: curl follows at most 5 redirects" "$calls" " --max-redirs 5 "
+# breaks-if: %{remote_ip} leaves the -w format, so real curl prints the status code where fetch_page reads the address
+assert_contains "url: curl prints remote_ip, status and content type, in that order" "$calls" \
+  ' -w %{remote_ip}\n%{http_code}\n%{content_type} '
 stdin=$(cat "$STUBS/cmd.stdin")
 assert_contains "url: backend gets the URL line" "$stdin" "URL: https://example.com/tide-pools"
 assert_contains "url: backend gets the page text" "$stdin" "Volunteers counted 412 sea stars"
@@ -319,6 +322,40 @@ summarize clipboard
 # breaks-if: the HTTP status check is removed and an error page is summarized
 assert_eq "HTTP error message" "example.com answered with HTTP 404. $HINT" "$out"
 assert_eq "HTTP error sends nothing" "no" "$(cmd_ran)"
+
+# remote_ip is the server curl talked to last, so these also stand for a
+# public URL that redirects into the local network.
+for ip in 127.0.0.1 10.0.0.5 169.254.169.254 ::1; do
+  reset_stubs
+  cp "$FIXTURES/article.html" "$STUB_PAGE"
+  clip "https://example.com/internal"
+  export STUB_REMOTE_IP="$ip"
+  summarize clipboard
+  # breaks-if: the public-ip check in fetch_page is removed and a page from an internal address reaches the backend
+  assert_eq "$ip remote address message" \
+    "Refused to fetch example.com: it leads to a private, loopback or link-local address ($ip). $HINT" "$out"
+  assert_eq "$ip remote address sends nothing" "no" "$(cmd_ran)"
+  refute_file "$ip remote address leaves no page text for the backend" "$STUBS/cmd.stdin"
+done
+
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/no-address"
+export STUB_REMOTE_IP=""
+summarize clipboard
+# breaks-if: fetch_page accepts a page when curl reports no remote address
+assert_eq "empty remote address message" \
+  "Refused to fetch example.com: it leads to a private, loopback or link-local address (unknown). $HINT" "$out"
+assert_eq "empty remote address sends nothing" "no" "$(cmd_ran)"
+
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/internal-404"
+export STUB_REMOTE_IP=10.0.0.5 STUB_HTTP_CODE=404
+summarize clipboard
+# breaks-if: the HTTP status check moves in front of the public-ip check
+assert_eq "internal address wins over the HTTP status" \
+  "Refused to fetch example.com: it leads to a private, loopback or link-local address (10.0.0.5). $HINT" "$out"
 
 reset_stubs
 printf '%%PDF-1.7 binary' >"$STUB_PAGE"
@@ -746,6 +783,24 @@ fi
 refute_file "old job directory removed" "$old"
 assert_contains "new job still runs" "$out" "TL;DR: stub summary."
 
+# While the command runs, the job's backend.pgid names the command's own
+# process group, which is what stop_old_jobs and render signal.
+reset_stubs
+clip "Text"
+export STUB_CMD_MODE=hang
+rec_job=$(sum_job="" bash "$SCRIPT" clipboard | json_get '$d->{variables}{sum_job}')
+for _ in $(seq 1 50); do [ -s "$STUBS/cmd.pid" ] && [ -s "$rec_job/backend.pgid" ] && break; sleep 0.1; done
+unset STUB_CMD_MODE
+rec_cmd_pid=$(cat "$STUBS/cmd.pid" 2>/dev/null)
+rec_real=$( [ -n "$rec_cmd_pid" ] && ps -o pgid= -p "$rec_cmd_pid" 2>/dev/null | tr -d ' \n')
+rec_seen=$(tr -d ' \n' <"$rec_job/backend.pgid" 2>/dev/null)
+# breaks-if: run_command stops passing SUM_PGID_FILE to timeout.pl
+assert_eq "backend.pgid names the running command's process group" "yes" \
+  "$([ -n "$rec_real" ] && [ "$rec_real" = "$rec_seen" ] && echo yes || echo no)"
+rm -f "$STUBS/cmd.pid"
+summarize clipboard
+[ -n "$rec_cmd_pid" ] && kill -KILL "$rec_cmd_pid" 2>/dev/null
+
 # fake_job NAME BODY: a stand-in job in $JOBS/NAME, started like start_job
 # starts one, in a process group of its own. Its command line ends in
 # "summarize.sh --run DIR", so the script takes it for the job in DIR. BODY
@@ -806,6 +861,127 @@ assert_eq "the wait for a stopped job is bounded" "1" "$(( SECONDS - start < 15 
 # breaks-if: stop_old_jobs keeps the directory of a job it had to KILL
 refute_file "the killed job's directory removed" "$JOBS/job.deaf"
 assert_contains "new job runs after a killed one" "$out" "TL;DR: stub summary."
+
+# A backend that ignores TERM, in a group of its own under a job that is
+# stuck, does not outlive the next start.
+reset_stubs
+clip "Text"
+fake_job job.backend 'trap "" TERM
+/usr/bin/perl -e '\''setpgrp(0, 0); $SIG{TERM} = "IGNORE"; open F, ">", $ARGV[0]; print F "$$\n"; close F; $0 = "deaf-backend"; sleep 60'\'' "$FAKE_OUT/backend.pid" &
+: >"$FAKE_OUT/ready"
+while :; do sleep 0.1; done'
+for _ in $(seq 1 50); do [ -s "$FAKE_OUT/backend.pid" ] && break; sleep 0.1; done
+backend_pid=$(cat "$FAKE_OUT/backend.pid" 2>/dev/null)
+printf '%s\n' "$backend_pid" >"$JOBS/job.backend/backend.pgid"
+summarize clipboard
+sleep 0.3
+# breaks-if: stop_old_jobs stops signalling the backend group recorded in backend.pgid
+if [ -z "$backend_pid" ]; then
+  not_ok "the backend never recorded its pid"
+elif kill -0 "$backend_pid" 2>/dev/null; then
+  not_ok "a backend that ignores TERM should be gone after the next start"
+  kill -KILL "$backend_pid" 2>/dev/null
+else
+  ok
+fi
+kill -KILL -- "-$fake_pid" 2>/dev/null
+assert_contains "new job runs after a job with a deaf backend" "$out" "TL;DR: stub summary."
+# breaks-if: stop_old_jobs keeps the directory of a job whose backend it killed
+refute_file "the job with a deaf backend removed" "$JOBS/job.backend"
+
+# deaf_backend: starts a process that ignores TERM in a group of its own,
+# the way timeout.pl starts the backend, and sets backend_pid. Started from
+# a subshell, so it is not a child of the test shell.
+deaf_backend() {
+  rm -f "$STUBS/backend.pid"
+  (/usr/bin/perl -e 'setpgrp(0, 0); $SIG{TERM} = "IGNORE"; open F, ">", $ARGV[0]; print F "$$\n"; close F; sleep 60' "$STUBS/backend.pid" \
+    </dev/null >/dev/null 2>&1 &)
+  for _ in $(seq 1 50); do [ -s "$STUBS/backend.pid" ] && break; sleep 0.1; done
+  backend_pid=$(cat "$STUBS/backend.pid" 2>/dev/null)
+}
+
+# dead_job NAME: a job in $JOBS/NAME whose process already ended without
+# writing done, as after a KILL from outside.
+dead_job() {
+  fake_job "$1" ': >"$FAKE_OUT/ready"'
+  for _ in $(seq 1 50); do fake_alive || break; sleep 0.1; done
+}
+
+# A job killed from outside took its timeout.pl down too. Its backend still
+# runs and dies on the next start.
+reset_stubs
+clip "Text"
+dead_job job.dead
+deaf_backend
+printf '%s\n' "$backend_pid" >"$JOBS/job.dead/backend.pgid"
+summarize clipboard
+sleep 0.3
+# breaks-if: stop_old_jobs calls kill_backend only for a job that is still running
+if [ -z "$backend_pid" ]; then
+  not_ok "the backend of a dead job never recorded its pid"
+elif kill -0 "$backend_pid" 2>/dev/null; then
+  not_ok "the backend of a dead job should be gone after the next start"
+  kill -KILL "$backend_pid" 2>/dev/null
+else
+  ok
+fi
+assert_contains "new job runs after a dead job with a live backend" "$out" "TL;DR: stub summary."
+refute_file "the dead job's directory removed" "$JOBS/job.dead"
+
+# An open view that renders a dead job also kills its recorded backend,
+# because it deletes the record with the directory.
+reset_stubs
+dead_job job.view
+deaf_backend
+printf '%s\n' "$backend_pid" >"$JOBS/job.view/backend.pgid"
+view_out=$(sum_job="$JOBS/job.view" bash "$SCRIPT" clipboard 2>/dev/null | json_get '$d->{response}')
+sleep 0.3
+assert_contains "render of a dead job ends the view" "$view_out" "Summarize stopped unexpectedly."
+# breaks-if: render deletes a dead job's directory without calling kill_backend
+if [ -z "$backend_pid" ]; then
+  not_ok "the backend of a rendered dead job never recorded its pid"
+elif kill -0 "$backend_pid" 2>/dev/null; then
+  not_ok "render of a dead job should kill its recorded backend"
+  kill -KILL "$backend_pid" 2>/dev/null
+else
+  ok
+fi
+# breaks-if: render keeps the directory of a dead job
+refute_file "the rendered dead job's directory removed" "$JOBS/job.view"
+
+# A recorded group with no process left, and garbage records, make
+# stop_old_jobs neither fail nor signal anything. job.junk is still running
+# and ignores the TERM, the others are dead. The garbage records wrap the
+# bystander's own group id, so a guard that reads a number out of them
+# would kill it.
+reset_stubs
+clip "Text"
+/usr/bin/perl -e 'setpgrp(0, 0); exec @ARGV' sleep 30 &
+bystander=$!
+fake_job job.junk 'trap "" TERM
+: >"$FAKE_OUT/ready"
+while :; do sleep 0.1; done'
+printf '%s\n' "${bystander}x" >"$JOBS/job.junk/backend.pgid"
+mkdir -p "$JOBS/job.neg" "$JOBS/job.space" "$JOBS/job.empty" "$JOBS/job.gone"
+printf '%s\n' "-$bystander" >"$JOBS/job.neg/backend.pgid"
+printf '%s\n' " $bystander" >"$JOBS/job.space/backend.pgid"
+: >"$JOBS/job.empty/backend.pgid"
+printf '%s\n' 999999 >"$JOBS/job.gone/backend.pgid"
+summarize clipboard
+# breaks-if: kill_backend aborts stop_old_jobs for a group that no longer exists
+assert_contains "new job runs despite stale pgid records" "$out" "TL;DR: stub summary."
+# breaks-if: kill_backend signals a record that is not a plain positive group id
+if kill -0 "$bystander" 2>/dev/null; then
+  ok
+else
+  not_ok "a stale or garbage backend.pgid should not signal anything"
+fi
+kill "$bystander" 2>/dev/null
+wait "$bystander" 2>/dev/null
+kill -KILL -- "-$fake_pid" 2>/dev/null
+for dir in job.junk job.neg job.space job.empty job.gone; do
+  refute_file "$dir with a bad pgid record removed" "$JOBS/$dir"
+done
 
 # A finished job's pid is never signalled, even if a process that looks
 # like that job holds it.
@@ -1332,6 +1508,17 @@ assert_eq "a failing cut sends nothing" "no" "$(cmd_ran)"
 SCRIPT="$STUBS/staged/scripts/summarize.sh" run_job_alone clipboard
 # breaks-if: drop_content stops deleting input.cut, which a failed cut leaves behind
 refute_content "failed cut"
+
+reset_stubs
+stage_scripts
+sed -i '' "s/'public-ip' => sub {/'public-ip' => sub { exit 2;/" "$STUBS/staged/scripts/text.pl"
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/helper-crash"
+SCRIPT="$STUBS/staged/scripts/summarize.sh" summarize clipboard
+# breaks-if: fetch_page refuses only on exit 1 from public-ip, so a crashed helper lets the page through
+assert_eq "a failing public-ip check refuses the page" \
+  "Refused to fetch example.com: it leads to a private, loopback or link-local address (93.184.216.34). $HINT" "$out"
+assert_eq "a failing public-ip check sends nothing" "no" "$(cmd_ran)"
 
 reset_stubs
 stage_scripts
