@@ -299,8 +299,11 @@ fetch_page() {
   fi
   # remote_ip is the server of the last request, after any redirects. Checked
   # before the body is used, so a redirect into the local network is refused.
+  # Earlier hops are not seen: a chain that passes an internal address and
+  # ends on a public one is accepted. Only exit 0 from public-ip accepts the
+  # page, so a crash of the helper refuses it too.
   rip=$(printf '%s\n' "$meta" | sed -n 1p)
-  if printf '%s' "$rip" | text_pl internal-ip; then
+  if ! printf '%s' "$rip" | text_pl public-ip; then
     fail "Refused to fetch $host: it leads to a private, loopback or link-local address (${rip:-unknown}). $HINT_ACTIVE_WINDOW"
   fi
   code=$(printf '%s\n' "$meta" | sed -n 2p)

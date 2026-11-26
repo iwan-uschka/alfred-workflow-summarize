@@ -4,8 +4,10 @@
 #
 #   text.pl trim                    stdin, without leading and trailing whitespace
 #   text.pl url-host                prints the host and exits 0 if stdin is a URL, else exits 1
-#   text.pl internal-ip             exits 0 if stdin is not a public IP address (loopback, private, link-local,
-#                                   other reserved ranges, or unparseable), else exits 1
+#   text.pl public-ip               exits 0 if stdin is a public IP address, else exits 1:
+#                                   loopback, private, link-local, shared, multicast,
+#                                   documentation, IPv6 forms embedding such an IPv4
+#                                   address, or unparseable (internal_ip lists the ranges)
 #   text.pl preview N               stdin on one line, cut to N characters plus "…"
 #   text.pl cut N                   stdin cut to N characters; exits 10 when it cut something
 #   text.pl count                   number of characters on stdin
@@ -178,6 +180,12 @@ sub no_remote {
     return $s;
 }
 
+# Returns 1 unless the trimmed argument is a public IP address. Refused:
+# unparseable input; IPv4 0/8, 10/8, 100.64/10, 127/8, 169.254/16, 172.16/12,
+# 192.0.0/24, 192.168/16, 198.18/15 and 224/4 and above; IPv6 :: and ::1,
+# fc00::/7, fe80::/10, ff00::/8 and 2001:db8::/32. IPv6 addresses that embed
+# an IPv4 address are judged by that IPv4 address: ::ffff:a.b.c.d,
+# ::ffff:0:a.b.c.d, ::a.b.c.d, NAT64 64:ff9b::/96 and 6to4 2002::/16.
 sub internal_ip {
     my $ip = trim($_[0]);
     my $bin = Socket::inet_pton(Socket::AF_INET6(), $ip);
@@ -193,6 +201,13 @@ sub internal_ip {
         return 1 if ($w[0] & 0xfe00) == 0xfc00;   # fc00::/7 unique local
         return 1 if ($w[0] & 0xffc0) == 0xfe80;   # fe80::/10 link-local
         return 1 if ($w[0] & 0xff00) == 0xff00;   # multicast
+        return internal_ip(join '.', unpack 'C4', substr($bin, 12))
+            if !grep({ $_ } @w[0 .. 3]) && $w[4] == 0xffff && $w[5] == 0;   # ::ffff:0:a.b.c.d translated
+        return internal_ip(join '.', unpack 'C4', substr($bin, 12))
+            if $w[0] == 0x64 && $w[1] == 0xff9b && !grep({ $_ } @w[2 .. 5]);   # NAT64
+        return internal_ip(join '.', unpack 'C4', substr($bin, 2, 4))
+            if $w[0] == 0x2002;                                                 # 6to4
+        return 1 if $w[0] == 0x2001 && $w[1] == 0x0db8;                         # documentation
         return 0;
     }
     $bin = Socket::inet_pton(Socket::AF_INET(), $ip);
@@ -209,7 +224,9 @@ sub internal_ip {
 }
 
 my %commands = (
-    'internal-ip' => sub { exit(internal_ip(stdin_text()) ? 0 : 1) },
+    # Exits 0 only for a public address, so a caller that refuses on any other
+    # exit code also refuses when this script itself fails.
+    'public-ip' => sub { exit(internal_ip(stdin_text()) ? 1 : 0) },
 
     'trim' => sub { out_text(trim(stdin_text())) },
 

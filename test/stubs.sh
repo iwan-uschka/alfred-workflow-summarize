@@ -60,7 +60,8 @@ cat "$STUB_OSA_OUT_FILE"
 STUB
 
 # curl: writes $STUB_PAGE to the -o file and prints "$STUB_REMOTE_IP" (public
-# by default), "$STUB_HTTP_CODE" and "$STUB_CTYPE" on three lines, like the -w format summarize.sh passes.
+# by default), "$STUB_HTTP_CODE" and "$STUB_CTYPE" on three lines, like the
+# -w format summarize.sh passes.
 # STUB_CURL_RC with STUB_CURL_ERR fails instead; STUB_CURL_HANG=1 sleeps
 # and ignores --max-time.
 cat >"$STUBS/curl" <<'STUB'

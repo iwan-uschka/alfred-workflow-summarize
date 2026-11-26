@@ -105,6 +105,9 @@ assert_eq "url: curl ignores ~/.curlrc" "curl -q " "$(grep '^curl ' <<<"$calls" 
 assert_contains "url: curl fetches only http and https" "$calls" " --proto =http,https --proto-redir =http,https "
 # breaks-if: the redirect limit is dropped and curl follows up to 50 redirects
 assert_contains "url: curl follows at most 5 redirects" "$calls" " --max-redirs 5 "
+# breaks-if: %{remote_ip} leaves the -w format, so real curl prints the status code where fetch_page reads the address
+assert_contains "url: curl prints remote_ip, status and content type, in that order" "$calls" \
+  ' -w %{remote_ip}\n%{http_code}\n%{content_type} '
 stdin=$(cat "$STUBS/cmd.stdin")
 assert_contains "url: backend gets the URL line" "$stdin" "URL: https://example.com/tide-pools"
 assert_contains "url: backend gets the page text" "$stdin" "Volunteers counted 412 sea stars"
@@ -319,6 +322,40 @@ summarize clipboard
 # breaks-if: the HTTP status check is removed and an error page is summarized
 assert_eq "HTTP error message" "example.com answered with HTTP 404. $HINT" "$out"
 assert_eq "HTTP error sends nothing" "no" "$(cmd_ran)"
+
+# remote_ip is the server curl talked to last, so these also stand for a
+# public URL that redirects into the local network.
+for ip in 127.0.0.1 10.0.0.5 169.254.169.254 ::1; do
+  reset_stubs
+  cp "$FIXTURES/article.html" "$STUB_PAGE"
+  clip "https://example.com/internal"
+  export STUB_REMOTE_IP="$ip"
+  summarize clipboard
+  # breaks-if: the public-ip check in fetch_page is removed and a page from an internal address reaches the backend
+  assert_eq "$ip remote address message" \
+    "Refused to fetch example.com: it leads to a private, loopback or link-local address ($ip). $HINT" "$out"
+  assert_eq "$ip remote address sends nothing" "no" "$(cmd_ran)"
+  refute_file "$ip remote address leaves no page text for the backend" "$STUBS/cmd.stdin"
+done
+
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/no-address"
+export STUB_REMOTE_IP=""
+summarize clipboard
+# breaks-if: fetch_page accepts a page when curl reports no remote address
+assert_eq "empty remote address message" \
+  "Refused to fetch example.com: it leads to a private, loopback or link-local address (unknown). $HINT" "$out"
+assert_eq "empty remote address sends nothing" "no" "$(cmd_ran)"
+
+reset_stubs
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/internal-404"
+export STUB_REMOTE_IP=10.0.0.5 STUB_HTTP_CODE=404
+summarize clipboard
+# breaks-if: the HTTP status check moves in front of the public-ip check
+assert_eq "internal address wins over the HTTP status" \
+  "Refused to fetch example.com: it leads to a private, loopback or link-local address (10.0.0.5). $HINT" "$out"
 
 reset_stubs
 printf '%%PDF-1.7 binary' >"$STUB_PAGE"
@@ -1332,6 +1369,17 @@ assert_eq "a failing cut sends nothing" "no" "$(cmd_ran)"
 SCRIPT="$STUBS/staged/scripts/summarize.sh" run_job_alone clipboard
 # breaks-if: drop_content stops deleting input.cut, which a failed cut leaves behind
 refute_content "failed cut"
+
+reset_stubs
+stage_scripts
+sed -i '' "s/'public-ip' => sub {/'public-ip' => sub { exit 2;/" "$STUBS/staged/scripts/text.pl"
+cp "$FIXTURES/article.html" "$STUB_PAGE"
+clip "https://example.com/helper-crash"
+SCRIPT="$STUBS/staged/scripts/summarize.sh" summarize clipboard
+# breaks-if: fetch_page refuses only on exit 1 from public-ip, so a crashed helper lets the page through
+assert_eq "a failing public-ip check refuses the page" \
+  "Refused to fetch example.com: it leads to a private, loopback or link-local address (93.184.216.34). $HINT" "$out"
+assert_eq "a failing public-ip check sends nothing" "no" "$(cmd_ran)"
 
 reset_stubs
 stage_scripts
