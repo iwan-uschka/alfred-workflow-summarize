@@ -150,6 +150,7 @@ summary:
 | `The command returned no summary.` | The command succeeded but printed nothing. |
 | `Could not fetch <host>: <curl error>.` | No connection, an unknown host, a TLS problem. |
 | `Fetching <host> timed out after <n> s (SUM_FETCH_TIMEOUT).` | The page took too long. |
+| `Refused to fetch <host>: it leads to a private, loopback or link-local address (<ip>).` | The URL, or a redirect it led to, points to this Mac or the local network, curl reached the page through a proxy with such an address, or curl reported no address (`unknown`). The workflow does not summarize the response. |
 | `<host> answered with HTTP <code>.` | The page returned an error, for example 403 or 404. |
 | `Could not convert the page at <host> to text.` | textutil failed on the downloaded page. |
 | `Converting the page at <host> timed out after <n> s (SUM_FETCH_TIMEOUT).` | textutil took too long on the downloaded page. |
@@ -173,8 +174,8 @@ summary:
 | `SUM_COMMAND is empty. Set it in the workflow's Configure Workflow screen.` | The Command setting is blank. |
 | `Input cut to <n> characters (SUM_MAX_CHARS).` | Shown above the summary when the input was longer than the limit. |
 
-The fetch messages (download error, timeout, HTTP error, conversion error,
-too little text, not a web page) end with "Open the page in your browser and use the
+The fetch messages (download error, timeout, internal address, HTTP error,
+conversion error, too little text, not a web page) end with "Open the page in your browser and use the
 "Active window" row." The browser often gets a page that a plain download
 does not, for example behind a login.
 
@@ -202,7 +203,11 @@ selections, clipboard contents and full mail bodies with sender and subject.
 With the default command, that is Claude Code, which sends it to Anthropic.
 If you set another command, it goes wherever that command sends it. When the
 clipboard holds a URL, the workflow also downloads that page itself with
-`curl`, so the site sees your IP address and the URL. Nothing is sent while
+`curl`, so the site sees your IP address and the URL. The workflow refuses the
+page when the server curl connected to, after any redirects, has a loopback,
+private or link-local address. The request still reaches that server, so the
+check keeps its response away from the command but does not stop the request.
+Nothing is sent while
 the rows are shown. Sending starts only when you press Enter on
 a row, and the "not supported" and "Nothing to summarize." cases send
 nothing.

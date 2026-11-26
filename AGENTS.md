@@ -27,7 +27,8 @@ sum [filter]  ->  Script Filter (rows.sh)  ->  Text View, script input (summariz
 - `scripts/summarize.sh`: the Text View script and the background job.
 - `scripts/text.pl`: text helpers in core Perl. Trimming, URL detection,
   the clipboard preview, cutting to a length in characters, charset
-  decoding, HTML stripping, prompt filling, removing Markdown images, links
+  decoding, HTML stripping, telling a public IP address from an internal
+  one (`public-ip`), prompt filling, removing Markdown images, links
   and HTML tags from the command's output (`no_remote`), and all JSON
   output.
 - `scripts/timeout.pl`: `timeout(1)` for macOS. Exit 124 on timeout, kills
@@ -150,6 +151,23 @@ same script-input Text View. Alfred does not document these numbers.
   entities and tables included. Plain text is accepted only as
   `text/plain` or `text/markdown`, decoded with the header's charset, else
   UTF-8. A fetched page with under 200 characters of text is refused.
+- **No internal addresses.** `fetch_page` reads `%{remote_ip}` from curl's
+  `-w` output, the server of the last request after any redirects, and
+  refuses the page before its body is used unless `text.pl public-ip` exits
+  0. It exits 0 only for a public address. Loopback, private, link-local,
+  shared (`100.64/10`), benchmarking (`198.18/15`), `192.0.0/24`,
+  `0/8`, `224.0.0.0` and above, IPv6 multicast, `2001:db8::/32`, an empty or
+  unparseable address, and IPv6 forms that carry such an IPv4 address
+  (`::ffff:`, `::ffff:0:`, `::a.b.c.d`, NAT64 `64:ff9b::/96`, 6to4
+  `2002::/16`) all exit 1. The caller refuses on any exit code other than
+  0, so a crash of `text.pl` also refuses the page. curl still sends the
+  request, so the check keeps the response out of the backend but does not
+  stop a blind request to an internal service. It also sees only the last
+  request, so a redirect chain that passes an internal address and ends on a
+  public one is accepted. Behind a proxy, curl reports the proxy's address,
+  so a proxy on a loopback or private address makes every fetch refuse. The
+  workflow does not pass `--noproxy`, because a proxy may be the only way out
+  of the user's network.
 - **Core tools only.** macOS ships everything the workflow runs: bash 3.2,
   `/usr/bin/perl` with core modules, `curl`, `textutil`, `osascript`.
 

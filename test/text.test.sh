@@ -22,6 +22,39 @@ trap 'rm -rf "$WORK"' EXIT
 assert_eq "trim strips spaces, tabs and newlines on both ends" "a b" "$(printf ' \n\ta b \n\n' | TP trim)"
 assert_eq "trim of only whitespace is empty" "" "$(printf ' \n\t ' | TP trim)"
 
+# --- public-ip: which addresses a fetch may use ---
+PI() { printf '%s' "$1" | TP public-ip; }
+for ip in 127.0.0.1 127.255.255.255 10.0.0.1 172.16.0.0 172.16.0.1 172.31.255.255 192.168.0.1 \
+  169.254.169.254 100.64.0.1 100.127.255.255 0.0.0.0 198.18.0.1 198.19.255.255 192.0.0.1 \
+  224.0.0.1 255.255.255.255 ::1 :: fe80::1 febf::1 fc00::1 fd12::1 fdff::1 ff02::1 ff00::1 \
+  ::ffff:127.0.0.1 ::ffff:192.168.0.1 ::ffff:7f00:1 ::127.0.0.1 ::10.0.0.1 ::7f00:1 ::2 \
+  garbage ''; do
+  # breaks-if: internal_ip stops treating this address as internal
+  PI "$ip"
+  assert_eq "not public: '$ip'" "1" "$?"
+done
+for ip in 93.184.216.34 8.8.8.8 172.15.255.255 172.32.0.1 100.63.255.255 100.128.0.1 \
+  192.169.0.1 192.0.1.1 198.17.255.255 198.20.0.1 169.253.0.1 169.255.0.1 223.255.255.255 \
+  2606:4700::1111 fbff::1 fe00::1 fec0::1 feff::1 ::ffff:8.8.8.8 ::8.8.8.8 ::808:808; do
+  # breaks-if: internal_ip refuses public addresses next to the private ranges
+  PI "$ip"
+  assert_eq "public: $ip" "0" "$?"
+done
+# IPv6 forms that carry an IPv4 address: NAT64, 6to4 and IPv4-translated.
+for ip in 64:ff9b::7f00:1 64:ff9b::a00:1 2002:7f00:1:: ::ffff:0:127.0.0.1 2001:db8::1; do
+  # breaks-if: internal_ip stops unwrapping NAT64, 6to4 or ::ffff:0: addresses, or stops refusing 2001:db8::/32
+  PI "$ip"
+  assert_eq "not public: $ip" "1" "$?"
+done
+for ip in 64:ff9b::808:808 2002:808:808:: ::ffff:0:8.8.8.8; do
+  # breaks-if: internal_ip refuses every NAT64, 6to4 or ::ffff:0: address instead of judging the IPv4 inside
+  PI "$ip"
+  assert_eq "public: $ip" "0" "$?"
+done
+# breaks-if: internal_ip stops trimming whitespace around the address, so curl's output fails to parse
+printf ' 8.8.8.8\n' | TP public-ip
+assert_eq "public address with surrounding whitespace" "0" "$?"
+
 # --- url-host: what counts as a URL ---
 assert_eq "https URL" "example.com" "$(UH 'https://example.com/a?b=1')"
 assert_eq "scheme in any case" "example.com" "$(UH 'HTTP://Example.COM/x')"
