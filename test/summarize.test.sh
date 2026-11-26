@@ -365,13 +365,13 @@ summarize clipboard
 # breaks-if: non-text responses are run through the HTML converter
 assert_eq "non-text response message" "example.com sent application/pdf, not a web page. $HINT" "$out"
 
-for ctype in "text/css" "text/javascript; charset=utf-8" "text/plainfoo" "text/markdownfoo"; do
+for ctype in "text/css" "text/javascript; charset=utf-8" "text/plainfoo" "text/markdownfoo" "text/htmlfoo" "text/htmlfoo; charset=utf-8" "application/xhtmlfoo" "application/xhtml+xmlfoo"; do
   reset_stubs
   printf '%s' "$(printf 'body { color: red; } %.0s' $(seq 1 20))" >"$STUB_PAGE"
   export STUB_CTYPE="$ctype"
   clip "https://example.com/asset"
   summarize clipboard
-  # breaks-if: every text/* type is summarized, not only text/plain and text/markdown
+  # breaks-if: every text/* type is summarized, or the HTML branch matches text/html and application/xhtml+xml by prefix, not exactly
   assert_eq "$ctype response message" "example.com sent ${ctype%%;*}, not a web page. $HINT" "$out"
   assert_eq "$ctype response sends nothing" "no" "$(cmd_ran)"
 done
