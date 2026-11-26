@@ -187,7 +187,9 @@ for t in test/*.test.sh; do bash "$t" || exit 1; done
   config guards, isolation of the command, stopping old jobs, ending the
   view for a job that died without `done`, that the read text leaves the
   job directory when a job finishes, is cut, fails or is still running its
-  command, and that the plist's defaults match the script's.
+  command, that `finish` stays silent and recreates nothing when the job
+  directory is deleted under it but still reports other write failures, and
+  that the plist's defaults match the script's.
 - `test/text.test.sh`: `text.pl`, `timeout.pl` and `html_to_text` against
   the fixtures.
 - `test/helpers.test.sh`: the assertion helpers and `reset_test_env` in

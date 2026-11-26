@@ -183,22 +183,28 @@ drop_content() {
 # example on a bug that trips `set -u`, still ends with a message and the
 # last lines of its own stderr, so the Text View never stays empty.
 finish() {
-  local rc=$?
+  local rc=$? werr
   [ -n "$CMD_DIR" ] && rm -rf "$CMD_DIR"
   [ -d "$JOB" ] || return
+  # render and stop_old_jobs delete the directory once done exists or the job
+  # has ended. job_running can still miss a live job, for example before
+  # start_job has written its pid, and stop_old_jobs deletes right after its
+  # KILL. So the directory can vanish between the check above and the writes
+  # here. The outer braces drop the shell's own "No such file or directory"
+  # then.
   if [ "$rc" -ne 0 ] && [ ! -s "$JOB/msg" ]; then
     {
-      printf 'Summarize stopped unexpectedly (exit code %s).\n' "$rc"
-      tail -n 3 "$JOB/job.err" 2>/dev/null
-    } >"$JOB/msg"
+      {
+        printf 'Summarize stopped unexpectedly (exit code %s).\n' "$rc"
+        tail -n 3 "$JOB/job.err" 2>/dev/null
+      } >"$JOB/msg"
+    } 2>/dev/null
   fi
   drop_content
   rm -f "$JOB/err"
-  # Order: render deletes the directory only once done exists or the job has
-  # exited, and stop_old_jobs only once the job has exited. done is the last
-  # file written. The braces keep the shell's own "No such file or directory"
-  # out of job.err if the directory is already gone.
-  { : >"$JOB/done"; } 2>/dev/null
+  # Any other failure to write done, such as a full disk, still goes to
+  # job.err, because render shows its last lines when done is missing.
+  werr=$({ : >"$JOB/done"; } 2>&1) || { [ ! -d "$JOB" ] || printf '%s\n' "$werr" >&2; }
   # Only after done: a running view shows status while out is empty.
   rm -f "$JOB/status"
 }

@@ -1417,12 +1417,41 @@ fdir="$STUBS/finish-race"
 rm -rf "$fdir"
 mkdir -p "$fdir"
 # breaks-if: finish writes done without silencing the error from a directory that was just deleted
+# shellcheck source=scripts/summarize.sh
 ( source "$SCRIPT"
   JOB="$fdir"
   CMD_DIR=""
+  # shellcheck disable=SC2329 # finish calls it
   drop_content() { rm -rf "$JOB"; }
   finish ) 2>"$STUBS/finish-race.err"
 assert_eq "finish into a deleted job directory prints nothing" "" "$(cat "$STUBS/finish-race.err")"
 refute_file "finish does not recreate a deleted job directory" "$fdir"
+
+# Same race on the failure path: the directory goes right after finish's
+# existence check, so the write of msg is the one that finds it missing.
+rm -rf "$fdir"
+mkdir -p "$fdir"
+# breaks-if: finish writes msg without silencing the error from a directory that was just deleted
+# shellcheck source=scripts/summarize.sh
+( source "$SCRIPT"
+  JOB="$fdir"
+  CMD_DIR=""
+  # eval, because shellcheck cannot parse a function named [.
+  eval '[() { builtin [ "$@"; local r=$?; if builtin [ "$1" = -d ]; then rm -rf "$JOB"; fi; return $r; }'
+  (exit 3)
+  finish ) 2>"$STUBS/finish-race-msg.err"
+assert_eq "finish with a failed job into a deleted directory prints nothing" "" "$(cat "$STUBS/finish-race-msg.err")"
+refute_file "finish does not recreate a directory deleted before it wrote msg" "$fdir"
+
+# A failure to write done that is not a missing directory stays visible.
+rm -rf "$fdir"
+mkdir -p "$fdir/done"
+# breaks-if: finish silences every failure to write done, not only a missing job directory
+# shellcheck source=scripts/summarize.sh
+( source "$SCRIPT"
+  JOB="$fdir"
+  CMD_DIR=""
+  finish ) 2>"$STUBS/finish-done-fail.err"
+assert_contains "finish reports a done file it cannot write" "$(cat "$STUBS/finish-done-fail.err")" "done"
 
 finish_tests
