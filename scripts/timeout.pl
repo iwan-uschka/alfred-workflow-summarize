@@ -9,6 +9,12 @@
 # TERM sent to this script is passed on to the group the same way, which is
 # how stopping a job also stops the backend it is waiting on.
 #
+# When SUM_PGID_FILE names a file, the command's process group is written to
+# it as soon as the group exists, and the file is removed once the command
+# has been reaped. A caller that has to kill this script can then still stop
+# the command by signalling the recorded group. The command does not
+# inherit SUM_PGID_FILE.
+#
 # Exit status: COMMAND's own, 124 on timeout (the same code as GNU timeout),
 # 125 for a bad SECONDS value, 127 when COMMAND cannot be started.
 use strict;
@@ -40,6 +46,11 @@ my $term = POSIX::SigSet->new(POSIX::SIGTERM());
 my $old_mask = POSIX::SigSet->new();
 POSIX::sigprocmask(POSIX::SIG_BLOCK(), $term, $old_mask);
 
+# Read it, then remove it from the environment the command inherits, so a
+# timeout.pl the command runs itself cannot overwrite or remove the record.
+my $pgid_file = delete $ENV{SUM_PGID_FILE};
+undef $pgid_file if defined $pgid_file && $pgid_file eq '';
+
 my $pid = fork;
 die "timeout.pl: fork failed: $!\n" unless defined $pid;
 if ($pid == 0) {
@@ -52,6 +63,16 @@ if ($pid == 0) {
 # Set the group from this side too, so a kill sent right after the fork
 # cannot miss a child that has not called setpgrp yet.
 setpgrp($pid, $pid);
+# Written to a temporary file and renamed, so a reader never sees the file
+# empty or half written.
+if (defined $pgid_file) {
+    my $tmp = "$pgid_file.$$";
+    if (open(my $fh, '>', $tmp)) {
+        print $fh "$pid\n";
+        if (close $fh) { rename $tmp, $pgid_file or unlink $tmp; }
+        else { unlink $tmp; }
+    }
+}
 
 my $timed_out = 0;
 my $stopping = 0;
@@ -77,6 +98,7 @@ my $done;
 do { $done = waitpid($pid, 0) } while ($done == -1 && $!{EINTR});
 my $status = $?;
 alarm 0;
+unlink $pgid_file if defined $pgid_file;
 # The command may have died on the TERM while something else in its group
 # ignored it. Cancelling the alarm cancelled that one's KILL, so send it now.
 kill 'KILL', -$pid if $timed_out;

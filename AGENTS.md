@@ -32,7 +32,9 @@ sum [filter]  ->  Script Filter (rows.sh)  ->  Text View, script input (summariz
   and HTML tags from the command's output (`no_remote`), and all JSON
   output.
 - `scripts/timeout.pl`: `timeout(1)` for macOS. Exit 124 on timeout, kills
-  the command's whole process group, passes a TERM on to that group.
+  the command's whole process group, passes a TERM on to that group, and
+  records that group in the file named by `SUM_PGID_FILE` while the command
+  runs.
 - `test/`: shell tests, see below. `test/fixtures/` holds small hand-written
   HTML pages.
 - `build.sh`, `make_release.sh`: packaging and releases.
@@ -60,13 +62,17 @@ the same way.
    unexpectedly." and the last lines of `job.err`. A job counts as running
    only while its pid still runs `summarize.sh --run <job>`. A KILL from
    outside also kills the job's `timeout.pl`, so a backend running at that
-   moment keeps running, and nothing stops it.
+   moment keeps running until an open view renders the failure or, with the
+   view closed, until the next start. Both kill its process group, which
+   `timeout.pl` recorded in `backend.pgid`.
 
 Starting a job stops every older job first (`stop_old_jobs`), so closing the
 Text View mid-run and starting again never leaves a backend running. It
 sends a TERM to the old job's process group, waits up to 5 seconds for the
-job to end, then sends a KILL if it is still running, and only then deletes
-the directory. The job's EXIT trap writes into that directory while it ends.
+job to end, then sends a KILL if it is still running. It also kills the
+backend's process group recorded in `backend.pgid`, if any process is left in
+it. Only then does it delete the directory. The job's EXIT trap writes into
+that directory while it ends.
 
 The Text View's `behaviour`, `outputmode` and `scriptinput` values in
 `info.plist` are copied from Alfred's own ChatGPT workflow, which uses the
@@ -129,8 +135,8 @@ same script-input Text View. Alfred does not document these numbers.
   deletes `err` and `status`. A job that ends after its view was closed
   leaves no read text, only `source`, `pid`, `out`, `notice`, `msg`,
   `job.err` and `done`. A job killed before `finish` runs keeps what it had,
-  `err` included, until an open view renders the failure or, with the view
-  closed, until the next start.
+  `err` and `backend.pgid` included, until an open view renders the failure
+  or, with the view closed, until the next start.
 - **Error detection survives translation.** macOS and the browsers translate
   AppleScript errors. `apple_error` matches the error number `-1743` and
   the words `JavaScript` plus `Apple Event`, `Apple-Event` or `AppleScript`,

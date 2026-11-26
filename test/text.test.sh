@@ -357,6 +357,54 @@ assert_eq "decode of a cut-off UTF-8 character exits 0" "0" "$?"
 assert_contains "decode turns a cut-off character into U+FFFD" "$out" "a�"
 
 # --- timeout.pl ---
+# The backend's group is recorded while it runs and removed once it ended.
+rm -f "$WORK/pgid"
+# The command waits for the record, because timeout.pl writes it only after
+# the fork, and the command may run first.
+SUM_PGID_FILE="$WORK/pgid" TO 5 /bin/bash -c "for i in \$(seq 1 20); do [ -s '$WORK/pgid' ] && break; sleep 0.1; done; cat '$WORK/pgid' >'$WORK/pgid.seen'; ps -o pgid= -p \$\$ >'$WORK/pgid.real'"
+# breaks-if: timeout.pl stops writing the backend's process group to SUM_PGID_FILE
+pgid_real=$(tr -d ' \n' <"$WORK/pgid.real")
+assert_eq "recorded group is the backend's own" "$pgid_real" "$(tr -d ' \n' <"$WORK/pgid.seen")"
+# breaks-if: an empty record and an empty ps output make the comparison above pass
+assert_eq "recorded group is a number" "1" "$([[ "$pgid_real" =~ ^[0-9]+$ ]] && echo 1 || echo 0)"
+# breaks-if: timeout.pl leaves SUM_PGID_FILE behind after the backend ended
+refute_file "pgid record removed after the backend ended" "$WORK/pgid"
+# An unwritable record path must not stop the command.
+SUM_PGID_FILE="$WORK/no-such-dir/pgid" TO 5 /bin/bash -c 'exit 4'
+# breaks-if: timeout.pl dies or changes the exit code when it cannot write SUM_PGID_FILE
+assert_eq "unwritable pgid file does not stop the command" "4" "$?"
+# An empty SUM_PGID_FILE counts as unset. Run in an empty directory, so a
+# record or temporary file written relative to it shows up there.
+mkdir -p "$WORK/empty-pgid"
+(cd "$WORK/empty-pgid" && SUM_PGID_FILE='' TO 5 /bin/bash -c "sleep 0.3; ls -A >'$WORK/empty-pgid.ls'; exit 5")
+# breaks-if: timeout.pl changes the exit code when SUM_PGID_FILE is empty
+assert_eq "empty SUM_PGID_FILE passes the exit code through" "5" "$?"
+# breaks-if: timeout.pl writes a record relative to the working directory for an empty SUM_PGID_FILE
+assert_eq "empty SUM_PGID_FILE writes nothing while the command runs" "" "$(cat "$WORK/empty-pgid.ls" 2>/dev/null)"
+assert_eq "empty SUM_PGID_FILE leaves nothing behind" "" "$(ls -A "$WORK/empty-pgid")"
+# The command does not inherit SUM_PGID_FILE.
+# breaks-if: timeout.pl leaves SUM_PGID_FILE in the command's environment
+# shellcheck disable=SC2016 # the inner shell expands the variable
+assert_eq "command does not see SUM_PGID_FILE" "unset" \
+  "$(SUM_PGID_FILE="$WORK/pgid.env" TO 5 /bin/bash -c 'echo "${SUM_PGID_FILE-unset}"')"
+# The record also goes when timeout.pl kills the command, on a timeout or on
+# a TERM sent to timeout.pl.
+rm -f "$WORK/pgid.to"
+SUM_PGID_FILE="$WORK/pgid.to" TO 1 /bin/bash -c 'sleep 30'
+assert_eq "timed-out command with a pgid file exits 124" "124" "$?"
+# breaks-if: timeout.pl skips removing SUM_PGID_FILE when it kills the command on a timeout
+refute_file "pgid record removed after a timeout" "$WORK/pgid.to"
+rm -f "$WORK/pgid.term"
+SUM_PGID_FILE="$WORK/pgid.term" /usr/bin/perl "$ROOT/scripts/timeout.pl" 30 /bin/bash -c 'sleep 30' &
+pid=$!
+for _ in $(seq 1 20); do [ -s "$WORK/pgid.term" ] && break; sleep 0.1; done
+assert_file "pgid record written before the TERM" "$WORK/pgid.term"
+kill -TERM "$pid"
+wait "$pid"
+assert_eq "TERM to timeout.pl with a pgid file exits 143" "143" "$?"
+# breaks-if: timeout.pl skips removing SUM_PGID_FILE when a TERM stops it
+refute_file "pgid record removed after a TERM" "$WORK/pgid.term"
+
 TO 5 /bin/bash -c 'exit 3'
 assert_eq "command's own exit code passes through" "3" "$?"
 assert_eq "command's stdout passes through" "hi" "$(TO 5 /bin/echo hi)"
