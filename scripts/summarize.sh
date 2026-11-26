@@ -28,7 +28,9 @@
 #   notice       a note shown above the summary (input was cut)
 #   out          the command's stdout, growing while it runs
 #   err          the command's stderr
-#   job.err      the job's own stderr, shown only if the job dies unexpectedly
+#   backend.pgid the command's process group while it runs (timeout.pl
+#                writes it and removes it once the command has ended)
+#   job.err     the job's own stderr, shown only if the job dies unexpectedly
 #   msg          the failure message, if any
 #   done         exists once the job has finished
 #
@@ -37,8 +39,9 @@
 # again, plus err and status, when the job ends. So a job that ends after
 # its Text View was closed leaves no read text, only source, pid, notice,
 # out, msg, job.err and done, until the next start. A job killed before
-# finish runs keeps what it had at that moment, err included, until an open
-# view renders the failure or, with the view closed, until the next start.
+# finish runs keeps what it had at that moment, err and backend.pgid
+# included, until an open view renders the failure or, with the view closed,
+# until the next start.
 #
 # Must stay compatible with /bin/bash 3.2 (what Alfred runs).
 set -uo pipefail
@@ -86,9 +89,11 @@ job_running() {
 STOP_WAIT_TENTHS=50
 
 # Kills the backend's process group recorded in DIR/backend.pgid. It does
-# nothing without a numeric record, or when no process is left in the group,
-# so a backend that already ended (timeout.pl removes the record) never
-# makes it signal a group that has since been reused.
+# nothing without a numeric record, or when no process is left in the group.
+# A backend that ended normally leaves no record, because timeout.pl removes
+# it. A record left by a job killed from outside can name a group id that
+# has since been reused: pgrep only shows that some process is in the group,
+# not that it is the old backend.
 kill_backend() {
   local pgid
   pgid=$(cat "$1/backend.pgid" 2>/dev/null)
@@ -105,13 +110,17 @@ stop_old_jobs() {
   for dir in "$1"/job.*; do
     [ -d "$dir" ] || continue
     pid=$(cat "$dir/pid" 2>/dev/null)
-    if [ ! -e "$dir/done" ] && job_running "$dir" "$pid"; then
-      kill -TERM -- "-$pid" 2>/dev/null
-      for ((i = 0; i < STOP_WAIT_TENTHS; i++)); do
-        job_running "$dir" "$pid" || break
-        sleep 0.1
-      done
-      job_running "$dir" "$pid" && kill -KILL -- "-$pid" 2>/dev/null
+    if [ ! -e "$dir/done" ]; then
+      if job_running "$dir" "$pid"; then
+        kill -TERM -- "-$pid" 2>/dev/null
+        for ((i = 0; i < STOP_WAIT_TENTHS; i++)); do
+          job_running "$dir" "$pid" || break
+          sleep 0.1
+        done
+        job_running "$dir" "$pid" && kill -KILL -- "-$pid" 2>/dev/null
+      fi
+      # Also for a job that is no longer running: a KILL from outside took
+      # its timeout.pl down too, so the backend may still run.
       kill_backend "$dir"
     fi
     rm -rf "$dir"
@@ -164,6 +173,9 @@ render() {
       } >"$job/msg"
     fi
     text_pl view-final "$job"
+    # A KILL that ended the job also ended its timeout.pl, so the backend
+    # may still run. Its record goes with the directory.
+    [ -e "$job/done" ] || kill_backend "$job"
     rm -rf "$job"
   fi
 }

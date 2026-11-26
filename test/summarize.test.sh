@@ -746,6 +746,24 @@ fi
 refute_file "old job directory removed" "$old"
 assert_contains "new job still runs" "$out" "TL;DR: stub summary."
 
+# While the command runs, the job's backend.pgid names the command's own
+# process group, which is what stop_old_jobs and render signal.
+reset_stubs
+clip "Text"
+export STUB_CMD_MODE=hang
+rec_job=$(sum_job="" bash "$SCRIPT" clipboard | json_get '$d->{variables}{sum_job}')
+for _ in $(seq 1 50); do [ -s "$STUBS/cmd.pid" ] && [ -s "$rec_job/backend.pgid" ] && break; sleep 0.1; done
+unset STUB_CMD_MODE
+rec_cmd_pid=$(cat "$STUBS/cmd.pid" 2>/dev/null)
+rec_real=$( [ -n "$rec_cmd_pid" ] && ps -o pgid= -p "$rec_cmd_pid" 2>/dev/null | tr -d ' \n')
+rec_seen=$(tr -d ' \n' <"$rec_job/backend.pgid" 2>/dev/null)
+# breaks-if: run_command stops passing SUM_PGID_FILE to timeout.pl
+assert_eq "backend.pgid names the running command's process group" "yes" \
+  "$([ -n "$rec_real" ] && [ "$rec_real" = "$rec_seen" ] && echo yes || echo no)"
+rm -f "$STUBS/cmd.pid"
+summarize clipboard
+[ -n "$rec_cmd_pid" ] && kill -KILL "$rec_cmd_pid" 2>/dev/null
+
 # fake_job NAME BODY: a stand-in job in $JOBS/NAME, started like start_job
 # starts one, in a process group of its own. Its command line ends in
 # "summarize.sh --run DIR", so the script takes it for the job in DIR. BODY
@@ -811,8 +829,6 @@ assert_contains "new job runs after a killed one" "$out" "TL;DR: stub summary."
 # stuck, does not outlive the next start.
 reset_stubs
 clip "Text"
-bk="$STUBS/backend-ran"
-rm -f "$bk"
 fake_job job.backend 'trap "" TERM
 /usr/bin/perl -e '\''setpgrp(0, 0); $SIG{TERM} = "IGNORE"; open F, ">", $ARGV[0]; print F "$$\n"; close F; $0 = "deaf-backend"; sleep 60'\'' "$FAKE_OUT/backend.pid" &
 : >"$FAKE_OUT/ready"
@@ -832,28 +848,103 @@ else
   ok
 fi
 kill -KILL -- "-$fake_pid" 2>/dev/null
+assert_contains "new job runs after a job with a deaf backend" "$out" "TL;DR: stub summary."
+# breaks-if: stop_old_jobs keeps the directory of a job whose backend it killed
+refute_file "the job with a deaf backend removed" "$JOBS/job.backend"
 
-# A recorded group with no process left, and a garbage record, make
-# stop_old_jobs neither fail nor signal anything.
+# deaf_backend: starts a process that ignores TERM in a group of its own,
+# the way timeout.pl starts the backend, and sets backend_pid. Started from
+# a subshell, so it is not a child of the test shell.
+deaf_backend() {
+  rm -f "$STUBS/backend.pid"
+  (/usr/bin/perl -e 'setpgrp(0, 0); $SIG{TERM} = "IGNORE"; open F, ">", $ARGV[0]; print F "$$\n"; close F; sleep 60' "$STUBS/backend.pid" \
+    </dev/null >/dev/null 2>&1 &)
+  for _ in $(seq 1 50); do [ -s "$STUBS/backend.pid" ] && break; sleep 0.1; done
+  backend_pid=$(cat "$STUBS/backend.pid" 2>/dev/null)
+}
+
+# dead_job NAME: a job in $JOBS/NAME whose process already ended without
+# writing done, as after a KILL from outside.
+dead_job() {
+  fake_job "$1" ': >"$FAKE_OUT/ready"'
+  for _ in $(seq 1 50); do fake_alive || break; sleep 0.1; done
+}
+
+# A job killed from outside took its timeout.pl down too. Its backend still
+# runs and dies on the next start.
 reset_stubs
 clip "Text"
-mkdir -p "$JOBS/job.gone" "$JOBS/job.junk"
-printf '%s\n' 999999 >"$JOBS/job.gone/backend.pgid"
-printf '%s\n' '-1' >"$JOBS/job.junk/backend.pgid"
+dead_job job.dead
+deaf_backend
+printf '%s\n' "$backend_pid" >"$JOBS/job.dead/backend.pgid"
+summarize clipboard
+sleep 0.3
+# breaks-if: stop_old_jobs calls kill_backend only for a job that is still running
+if [ -z "$backend_pid" ]; then
+  not_ok "the backend of a dead job never recorded its pid"
+elif kill -0 "$backend_pid" 2>/dev/null; then
+  not_ok "the backend of a dead job should be gone after the next start"
+  kill -KILL "$backend_pid" 2>/dev/null
+else
+  ok
+fi
+assert_contains "new job runs after a dead job with a live backend" "$out" "TL;DR: stub summary."
+refute_file "the dead job's directory removed" "$JOBS/job.dead"
+
+# An open view that renders a dead job also kills its recorded backend,
+# because it deletes the record with the directory.
+reset_stubs
+dead_job job.view
+deaf_backend
+printf '%s\n' "$backend_pid" >"$JOBS/job.view/backend.pgid"
+view_out=$(sum_job="$JOBS/job.view" bash "$SCRIPT" clipboard 2>/dev/null | json_get '$d->{response}')
+sleep 0.3
+assert_contains "render of a dead job ends the view" "$view_out" "Summarize stopped unexpectedly."
+# breaks-if: render deletes a dead job's directory without calling kill_backend
+if [ -z "$backend_pid" ]; then
+  not_ok "the backend of a rendered dead job never recorded its pid"
+elif kill -0 "$backend_pid" 2>/dev/null; then
+  not_ok "render of a dead job should kill its recorded backend"
+  kill -KILL "$backend_pid" 2>/dev/null
+else
+  ok
+fi
+# breaks-if: render keeps the directory of a dead job
+refute_file "the rendered dead job's directory removed" "$JOBS/job.view"
+
+# A recorded group with no process left, and garbage records, make
+# stop_old_jobs neither fail nor signal anything. job.junk is still running
+# and ignores the TERM, the others are dead. The garbage records wrap the
+# bystander's own group id, so a guard that reads a number out of them
+# would kill it.
+reset_stubs
+clip "Text"
 /usr/bin/perl -e 'setpgrp(0, 0); exec @ARGV' sleep 30 &
 bystander=$!
-printf '%s\n' "$bystander" >"$JOBS/job.gone/pid"
+fake_job job.junk 'trap "" TERM
+: >"$FAKE_OUT/ready"
+while :; do sleep 0.1; done'
+printf '%s\n' "${bystander}x" >"$JOBS/job.junk/backend.pgid"
+mkdir -p "$JOBS/job.neg" "$JOBS/job.space" "$JOBS/job.empty" "$JOBS/job.gone"
+printf '%s\n' "-$bystander" >"$JOBS/job.neg/backend.pgid"
+printf '%s\n' " $bystander" >"$JOBS/job.space/backend.pgid"
+: >"$JOBS/job.empty/backend.pgid"
+printf '%s\n' 999999 >"$JOBS/job.gone/backend.pgid"
 summarize clipboard
+# breaks-if: kill_backend aborts stop_old_jobs for a group that no longer exists
 assert_contains "new job runs despite stale pgid records" "$out" "TL;DR: stub summary."
 # breaks-if: kill_backend signals a record that is not a plain positive group id
 if kill -0 "$bystander" 2>/dev/null; then
   ok
-  kill "$bystander" 2>/dev/null
 else
   not_ok "a stale or garbage backend.pgid should not signal anything"
 fi
-refute_file "job with a gone group removed" "$JOBS/job.gone"
-refute_file "job with a junk record removed" "$JOBS/job.junk"
+kill "$bystander" 2>/dev/null
+wait "$bystander" 2>/dev/null
+kill -KILL -- "-$fake_pid" 2>/dev/null
+for dir in job.junk job.neg job.space job.empty job.gone; do
+  refute_file "$dir with a bad pgid record removed" "$JOBS/$dir"
+done
 
 # A finished job's pid is never signalled, even if a process that looks
 # like that job holds it.
